@@ -576,29 +576,55 @@ export class Roulette extends EventTarget {
     return this._marbles.length;
   }
 
+  private _customStages: StageDef[] = [];
+
+  public addCustomMap(stage: StageDef): number {
+    const existingIdx = this._customStages.findIndex((s) => s.title === stage.title);
+    let targetIdx: number;
+    if (existingIdx >= 0) {
+      this._customStages[existingIdx] = stage;
+      targetIdx = stages.length + existingIdx;
+    } else {
+      this._customStages.push(stage);
+      targetIdx = stages.length + this._customStages.length - 1;
+    }
+    this.setMap(targetIdx);
+    return targetIdx;
+  }
+
+  public getAllStages(): StageDef[] {
+    return [...stages, ...this._customStages];
+  }
+
+  public getCurrentStage(): StageDef | null {
+    return this._stage;
+  }
+
   public getMaps() {
-    return stages.map((stage, index) => {
+    return this.getAllStages().map((stage, index) => {
       return {
         index,
-        title: stage.title,
+        title: index >= stages.length ? `[커스텀] ${stage.title}` : stage.title,
       };
     });
   }
 
   public getCurrentMap() {
     if (!this._stage) return null;
+    const all = this.getAllStages();
     return {
-      index: stages.indexOf(this._stage),
+      index: all.indexOf(this._stage),
       title: this._stage.title,
     };
   }
 
   public setMap(index: number) {
-    if (index < 0 || index > stages.length - 1) {
+    const all = this.getAllStages();
+    if (index < 0 || index > all.length - 1) {
       throw new Error('Incorrect map number');
     }
     const names = this._marbles.map((marble) => marble.name);
-    this._stage = stages[index];
+    this._stage = all[index];
     this.setMarbles(names);
     this._camera.initializePosition();
   }

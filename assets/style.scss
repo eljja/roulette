@@ -607,3 +607,458 @@ div.toast {
   border: 2px solid black;
   border-radius: 10px;
 }
+
+/* ==================== Map Editor Overlay & Layout ==================== */
+.map-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: #121314;
+  display: flex;
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+
+  &.hide {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+.map-editor-layout {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 왼쪽: 캔버스 뷰 */
+.editor-canvas-container {
+  flex: 1;
+  position: relative;
+  height: 100%;
+  background: #181a1b;
+
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .canvas-floating-controls {
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 10;
+
+    button {
+      width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      background: rgba(30, 30, 30, 0.85);
+      color: #00e5ff;
+      border: 1px solid rgba(0, 229, 255, 0.3);
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+
+      &:hover {
+        background: rgba(0, 229, 255, 0.2);
+        border-color: #00e5ff;
+      }
+    }
+  }
+
+  .canvas-hints {
+    position: absolute;
+    bottom: 1rem;
+    left: 1rem;
+    display: flex;
+    gap: 12px;
+    background: rgba(10, 10, 10, 0.75);
+    backdrop-filter: blur(4px);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    color: #bbb;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    pointer-events: none;
+  }
+
+  .test-mode-banner {
+    position: absolute;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(220, 20, 60, 0.88);
+    color: white;
+    padding: 8px 20px;
+    border-radius: 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 14px;
+    font-weight: bold;
+    box-shadow: 0 4px 16px rgba(220, 20, 60, 0.4);
+    z-index: 20;
+
+    &.hide {
+      display: none;
+    }
+
+    button {
+      background: white;
+      color: #c01030;
+      border: none;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+  }
+}
+
+/* 오른쪽: 사이드바 */
+.editor-sidebar {
+  width: 360px;
+  min-width: 320px;
+  max-width: 400px;
+  height: 100%;
+  background: #212529;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.5);
+
+  .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: #1a1d20;
+
+    h3 {
+      margin: 0;
+      font-size: 16px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #00c853, #009624);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: opacity 0.15s;
+
+      &:hover {
+        opacity: 0.9;
+      }
+    }
+  }
+
+  .sidebar-actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 14px 4px 14px;
+
+    &.secondary {
+      padding-top: 4px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .btn-action {
+      flex: 1;
+      padding: 9px 8px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s;
+
+      &.btn-test {
+        background: #2c3840;
+        color: #00e5ff;
+        border-color: rgba(0, 229, 255, 0.3);
+
+        &.active {
+          background: #d32f2f;
+          color: white;
+          border-color: #ef5350;
+        }
+
+        &:hover {
+          background: #37474f;
+        }
+      }
+
+      &.btn-share {
+        background: #2a3a2d;
+        color: #69f0ae;
+        border-color: rgba(105, 240, 174, 0.3);
+
+        &:hover {
+          background: #334d38;
+        }
+      }
+    }
+
+    .btn-sub {
+      flex: 1;
+      padding: 6px 8px;
+      background: #2a2e33;
+      color: #cfd8dc;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 5px;
+      font-size: 11px;
+      text-align: center;
+      cursor: pointer;
+
+      &:hover {
+        background: #373c42;
+      }
+
+      &.file-label {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    }
+  }
+
+  .sidebar-scrollable {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 14px 24px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 3px;
+    }
+  }
+
+  .panel-section {
+    background: #1a1d20;
+    border-radius: 8px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+
+    .section-title {
+      font-size: 12px;
+      font-weight: bold;
+      color: #00e5ff;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .form-row {
+      margin-bottom: 10px;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+
+      label {
+        display: block;
+        font-size: 11px;
+        color: #90a4ae;
+        margin-bottom: 4px;
+      }
+
+      input[type="text"],
+      input[type="number"],
+      select {
+        width: 100%;
+        background: #2a2e33;
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 5px;
+        padding: 6px 8px;
+        font-size: 12px;
+        outline: none;
+
+        &:focus {
+          border-color: #00e5ff;
+        }
+      }
+
+      .range-with-num {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        input[type="range"] {
+          flex: 1;
+          accent-color: #00e5ff;
+        }
+
+        input[type="number"] {
+          width: 65px;
+          text-align: right;
+        }
+      }
+
+      .dual-inputs {
+        display: flex;
+        gap: 6px;
+
+        input {
+          flex: 1;
+        }
+      }
+    }
+  }
+
+  /* 아이템 팔레트 그리드 */
+  .palette-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+
+    .palette-item {
+      background: #252a2f;
+      border: 1px dashed rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      padding: 10px 6px;
+      text-align: center;
+      cursor: grab;
+      user-select: none;
+      transition: all 0.15s;
+
+      &:hover {
+        border-color: #00e5ff;
+        background: rgba(0, 229, 255, 0.08);
+        transform: translateY(-1px);
+      }
+
+      &:active {
+        cursor: grabbing;
+      }
+
+      .palette-icon {
+        font-size: 20px;
+        line-height: 1;
+        margin-bottom: 4px;
+
+        &.pin-icon { color: #00e5ff; }
+        &.spinner-icon { color: #ffd600; }
+        &.bubble-icon { color: #ffab00; }
+        &.barrier-icon { color: #eceff1; }
+      }
+
+      .palette-label {
+        font-size: 11px;
+        color: #e0e0e0;
+        font-weight: 500;
+      }
+    }
+  }
+
+  /* 선택 아이템 인스펙터 */
+  .inspector-section {
+    min-height: 180px;
+
+    .empty-hint {
+      font-size: 11px;
+      color: #78909c;
+      text-align: center;
+      padding: 24px 8px;
+      line-height: 1.5;
+    }
+
+    .inspector-badge {
+      background: rgba(0, 229, 255, 0.1);
+      color: #00e5ff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      margin-bottom: 10px;
+      border-left: 3px solid #00e5ff;
+    }
+
+    .inspector-buttons {
+      display: flex;
+      gap: 6px;
+      margin-top: 14px;
+
+      button {
+        flex: 1;
+        padding: 7px 6px;
+        border-radius: 5px;
+        font-size: 11px;
+        font-weight: bold;
+        cursor: pointer;
+        border: none;
+
+        &.btn-danger {
+          background: #c62828;
+          color: white;
+
+          &:hover {
+            background: #d32f2f;
+          }
+        }
+      }
+    }
+  }
+}
+
+.editor-toast {
+  position: fixed;
+  top: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 25, 30, 0.95);
+  color: #00e5ff;
+  padding: 10px 24px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: bold;
+  border: 1px solid #00e5ff;
+  box-shadow: 0 4px 20px rgba(0, 229, 255, 0.35);
+  z-index: 3000;
+  pointer-events: none;
+  animation: fadeInDown 0.25s ease;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+

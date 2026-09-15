@@ -235,22 +235,76 @@
 
     document.querySelector('#btnShuffle').click();
 
-    const maps = window.roulette.getMaps();
     const mapSelector = document.querySelector('#sltMap');
-    maps.forEach((map) => {
-      const option = document.createElement('option');
-      option.value = map.index;
-      option.innerHTML = map.title;
-      option.setAttribute('data-trans', '');
-      window.translateElement(option);
-      mapSelector.append(option);
-    });
+
+    function refreshMapSelector(selectedIdx) {
+      mapSelector.innerHTML = '';
+      const maps = window.roulette.getMaps();
+      maps.forEach((map) => {
+        const option = document.createElement('option');
+        option.value = map.index;
+        option.innerHTML = map.title;
+        if (selectedIdx !== undefined && map.index === selectedIdx) {
+          option.selected = true;
+        }
+        option.setAttribute('data-trans', '');
+        if (window.translateElement) window.translateElement(option);
+        mapSelector.append(option);
+      });
+    }
+
+    refreshMapSelector();
+
     mapSelector.addEventListener('change', (e) => {
-      window.roulette.setMap(e.target.value);
-      // setMap은 살아남은 구슬에서 이름을 뽑아 재구성한다. 골인한 구슬이 사라지고
-      // 무게(/n)도 날아가므로, 원본인 이름 입력창에서 다시 채운다
+      window.roulette.setMap(parseInt(e.target.value, 10));
       getReady();
     });
+
+    // 로컬 스토리지에 저장된 사용자 커스텀 맵 불러오기
+    if (window.loadCustomMapsFromLocal) {
+      const savedMaps = window.loadCustomMapsFromLocal();
+      savedMaps.forEach((st) => window.roulette.addCustomMap(st));
+      refreshMapSelector();
+    }
+
+    // URL Hash (#map=...) 로 공유된 맵 자동 감지 및 로드 (Option 2)
+    function checkUrlMap() {
+      if (window.importMapFromUrl) {
+        const customFromUrl = window.importMapFromUrl();
+        if (customFromUrl) {
+          const idx = window.roulette.addCustomMap(customFromUrl);
+          refreshMapSelector(idx);
+          getReady();
+          simpleToast(`🔗 공유된 맵 '${customFromUrl.title}'을 불러왔습니다!`);
+        }
+      }
+    }
+    checkUrlMap();
+    window.addEventListener('hashchange', checkUrlMap);
+
+    // 맵 에디터 열기/닫기 제어
+    const editorOverlay = document.querySelector('#mapEditorOverlay');
+    const btnOpenEditor = document.querySelector('#btnOpenEditor');
+    let activeEditorUI = null;
+
+    if (btnOpenEditor) {
+      btnOpenEditor.addEventListener('click', () => {
+        document.querySelector('#settings').classList.add('hide');
+        editorOverlay.classList.remove('hide');
+
+        const currentStage = window.roulette.getCurrentStage();
+        activeEditorUI = new window.MapEditorUI(editorOverlay, currentStage, (updatedStage) => {
+          // [게임으로 가기] 클릭 시
+          editorOverlay.classList.add('hide');
+          document.querySelector('#settings').classList.remove('hide');
+
+          const mapIdx = window.roulette.addCustomMap(updatedStage);
+          refreshMapSelector(mapIdx);
+          getReady();
+          simpleToast(`'${updatedStage.title}' 맵이 적용되었습니다!`);
+        });
+      });
+    }
 
     // const checkDonateButtonLoaded = () => {
     //   const btn = document.querySelector('span.bmc-btn-text');
@@ -295,6 +349,7 @@
           <span data-trans>Map</span>
         </label>
         <select id="sltMap"></select>
+        <button type="button" id="btnOpenEditor" class="btn" style="margin-left: 6px; padding: 4px 8px; font-size: 11px; white-space: nowrap; background: #00838f;" title="맵 에디터 열기">🛠️ 에디터</button>
       </div>
       <div class="row row-toggles">
         <div class='toggle-item'>
@@ -358,5 +413,6 @@
 </div>
 <div class="copyright">&copy; 2022-2026. 마블 룰렛™ by <a href="https://lazygyu.net" target="_blank">lazygyu</a> (modified by eljja)
 </div>
+<div id="mapEditorOverlay" class="map-editor-overlay hide"></div>
 </body>
 </html>
