@@ -292,6 +292,12 @@
         document.querySelector('#settings').classList.add('hide');
         editorOverlay.classList.remove('hide');
 
+        // 이전 에디터 인스턴스가 남아있으면 정리 (이벤트/rAF 누수 방지)
+        if (activeEditorUI) {
+          activeEditorUI.destroy();
+          activeEditorUI = null;
+        }
+
         const currentStage = window.roulette.getCurrentStage();
         activeEditorUI = new window.MapEditorUI(editorOverlay, currentStage, (updatedStage) => {
           // [게임으로 가기] 클릭 시

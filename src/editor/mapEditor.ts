@@ -32,7 +32,12 @@ export type HandleType =
   | 'box-right'
   | 'box-top'
   | 'box-bottom'
-  | 'box-rotate';
+  | 'box-rotate'
+  | 'spawn-body'
+  | 'spawn-left'
+  | 'spawn-right'
+  | 'spawn-top'
+  | 'spawn-bottom';
 
 interface ActiveHandleState {
   type: HandleType;
@@ -43,6 +48,7 @@ interface ActiveHandleState {
   boxStartH: number;
   boxStartRot: number;
   circleStartR: number;
+  spawnStart?: { x: number; y: number; width: number; height: number };
 }
 
 export class MapEditor {
@@ -64,6 +70,13 @@ export class MapEditor {
   private panStart = { x: 0, y: 0 };
   private activeHandle: ActiveHandleState | null = null;
   private hoveredHandle: { type: HandleType; vertexIndex?: number } | null = null;
+
+  // 미니맵 설정 (기존 게임 4px/m 대비 절반 비율: 2px/m)
+  private readonly MINIMAP_SCALE = 2;
+  private readonly MINIMAP_UNITS = 26;
+  private readonly MINIMAP_X = 16;
+  private readonly MINIMAP_Y = 16;
+  private isMinimapDragging = false;
 
   // 테스트 플레이 상태
   public isTesting = false;
@@ -149,6 +162,19 @@ export class MapEditor {
     this.viewY = Math.min(this.stage.goalY / 2, 40);
     this.onSelectionChange?.(null, null);
     this.onStageChange?.(this.stage);
+  }
+
+  /** 출발 영역 가져오기 (기본값: 하드코딩 기존 위치) */
+  public getSpawnArea() {
+    return this.stage.spawnArea ?? { x: 9.25, y: 0, width: 7.25, height: 6 };
+  }
+
+  /** 출발 영역 설정 (없으면 생성) */
+  private ensureSpawnArea() {
+    if (!this.stage.spawnArea) {
+      this.stage.spawnArea = { x: 9.25, y: 0, width: 7.25, height: 6 };
+    }
+    return this.stage.spawnArea;
   }
 
   // 월드 <-> 스크린 변환
@@ -320,6 +346,16 @@ export class MapEditor {
       }
 
       if (e.button === 0) {
+        // 0. 미니맵 클릭 검사 (뷰포트 이동)
+        const mmW = this.MINIMAP_UNITS * this.MINIMAP_SCALE;
+        const mmH = Math.max(60, this.stage.goalY * this.MINIMAP_SCALE);
+        if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
+          this.isMinimapDragging = true;
+          this.viewX = (sx - this.MINIMAP_X) / this.MINIMAP_SCALE;
+          this.viewY = (sy - this.MINIMAP_Y) / this.MINIMAP_SCALE;
+          return;
+        }
+
         // 1. 현재 선택된 엔티티의 기즈모 핸들 클릭 여부 최우선 검사
         if (this.selectedIndex !== null && this.stage.entities?.[this.selectedIndex]) {
           const selEntity = this.stage.entities[this.selectedIndex];
@@ -356,6 +392,66 @@ export class MapEditor {
           };
           this.canvas.style.cursor = 'ns-resize';
           return;
+        }
+
+        // 2.5 출발 영역(Spawn Zone) 히트테스트
+        {
+          const sp = this.getSpawnArea();
+          const tolW = 8 / this.zoom; // 8px 허용 오차를 월드 단위로 변환
+          const left = sp.x;
+          const right = sp.x + sp.width;
+          const top = sp.y;
+          const bottom = sp.y + sp.height;
+          const inX = world.x >= left - tolW && world.x <= right + tolW;
+          const inY = world.y >= top - tolW && world.y <= bottom + tolW;
+          const spawnHandleBase = {
+            startWorld: { x: world.x, y: world.y },
+            entityStartPos: { x: 0, y: 0 },
+            boxStartW: 0,
+            boxStartH: 0,
+            boxStartRot: 0,
+            circleStartR: 0,
+            spawnStart: { ...sp },
+          };
+
+          // 에지 핸들 검사
+          if (inY && Math.abs(world.x - left) <= tolW) {
+            this.activeHandle = { ...spawnHandleBase, type: 'spawn-left' };
+            this.selectedIndex = null;
+            this.onSelectionChange?.(null, null);
+            this.canvas.style.cursor = 'ew-resize';
+            return;
+          }
+          if (inY && Math.abs(world.x - right) <= tolW) {
+            this.activeHandle = { ...spawnHandleBase, type: 'spawn-right' };
+            this.selectedIndex = null;
+            this.onSelectionChange?.(null, null);
+            this.canvas.style.cursor = 'ew-resize';
+            return;
+          }
+          if (inX && Math.abs(world.y - top) <= tolW) {
+            this.activeHandle = { ...spawnHandleBase, type: 'spawn-top' };
+            this.selectedIndex = null;
+            this.onSelectionChange?.(null, null);
+            this.canvas.style.cursor = 'ns-resize';
+            return;
+          }
+          if (inX && Math.abs(world.y - bottom) <= tolW) {
+            this.activeHandle = { ...spawnHandleBase, type: 'spawn-bottom' };
+            this.selectedIndex = null;
+            this.onSelectionChange?.(null, null);
+            this.canvas.style.cursor = 'ns-resize';
+            return;
+          }
+
+          // 영역 내부 클릭: 전체 이동
+          if (world.x > left + tolW && world.x < right - tolW && world.y > top + tolW && world.y < bottom - tolW) {
+            this.activeHandle = { ...spawnHandleBase, type: 'spawn-body' };
+            this.selectedIndex = null;
+            this.onSelectionChange?.(null, null);
+            this.canvas.style.cursor = 'move';
+            return;
+          }
         }
 
         // 3. 엔티티 클릭 선택 체크 (위에 그려진 것 먼저)
@@ -410,6 +506,21 @@ export class MapEditor {
         return;
       }
 
+      // 미니맵 드래그 중 (뷰포트 추적 이동)
+      if (this.isMinimapDragging) {
+        this.viewX = (sx - this.MINIMAP_X) / this.MINIMAP_SCALE;
+        this.viewY = (sy - this.MINIMAP_Y) / this.MINIMAP_SCALE;
+        return;
+      }
+
+      // 미니맵 영역 마우스 호버 커서
+      const mmW = this.MINIMAP_UNITS * this.MINIMAP_SCALE;
+      const mmH = Math.max(60, this.stage.goalY * this.MINIMAP_SCALE);
+      if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
+        this.canvas.style.cursor = 'pointer';
+        return;
+      }
+
       // 아무것도 드래그하지 않을 때 커서 모양 피드백
       if (!this.activeHandle) {
         let newCursor = '';
@@ -447,11 +558,34 @@ export class MapEditor {
           if (Math.abs(world.y - this.stage.goalY) < 1.0) {
             newCursor = 'ns-resize';
           } else {
-            const entities = this.stage.entities || [];
-            for (let i = entities.length - 1; i >= 0; i--) {
-              if (this.hitTest(entities[i], world.x, world.y)) {
-                newCursor = 'move';
-                break;
+            // 출발 영역 커서 피드백
+            const sp = this.getSpawnArea();
+            const tolW = 8 / this.zoom;
+            const left = sp.x;
+            const right = sp.x + sp.width;
+            const top = sp.y;
+            const bottom = sp.y + sp.height;
+            const inX = world.x >= left - tolW && world.x <= right + tolW;
+            const inY = world.y >= top - tolW && world.y <= bottom + tolW;
+
+            if (inY && (Math.abs(world.x - left) <= tolW || Math.abs(world.x - right) <= tolW)) {
+              newCursor = 'ew-resize';
+            } else if (inX && (Math.abs(world.y - top) <= tolW || Math.abs(world.y - bottom) <= tolW)) {
+              newCursor = 'ns-resize';
+            } else if (
+              world.x > left + tolW &&
+              world.x < right - tolW &&
+              world.y > top + tolW &&
+              world.y < bottom - tolW
+            ) {
+              newCursor = 'move';
+            } else {
+              const entities = this.stage.entities || [];
+              for (let i = entities.length - 1; i >= 0; i--) {
+                if (this.hitTest(entities[i], world.x, world.y)) {
+                  newCursor = 'move';
+                  break;
+                }
               }
             }
           }
@@ -468,6 +602,35 @@ export class MapEditor {
         const newGoalY = Math.max(20, Math.round(world.y * 2) / 2);
         this.stage.goalY = newGoalY;
         this.stage.zoomY = Math.max(15, newGoalY - 5);
+        this.onStageChange?.(this.stage);
+        return;
+      }
+
+      // 출발 영역(Spawn Zone) 드래그 처리
+      if (handle.type.startsWith('spawn-') && handle.spawnStart) {
+        const sp = this.ensureSpawnArea();
+        const s = handle.spawnStart;
+        const dx = world.x - handle.startWorld.x;
+        const dy = world.y - handle.startWorld.y;
+
+        if (handle.type === 'spawn-body') {
+          sp.x = Math.round((s.x + dx) * 4) / 4;
+          sp.y = Math.round((s.y + dy) * 4) / 4;
+        } else if (handle.type === 'spawn-left') {
+          const newLeft = Math.round((s.x + dx) * 4) / 4;
+          const maxLeft = s.x + s.width - 1;
+          sp.x = Math.min(newLeft, maxLeft);
+          sp.width = s.width - (sp.x - s.x);
+        } else if (handle.type === 'spawn-right') {
+          sp.width = Math.max(1, Math.round((s.width + dx) * 4) / 4);
+        } else if (handle.type === 'spawn-top') {
+          const newTop = Math.round((s.y + dy) * 4) / 4;
+          const maxTop = s.y + s.height - 1;
+          sp.y = Math.min(newTop, maxTop);
+          sp.height = s.height - (sp.y - s.y);
+        } else if (handle.type === 'spawn-bottom') {
+          sp.height = Math.max(1, Math.round((s.height + dy) * 4) / 4);
+        }
         this.onStageChange?.(this.stage);
         return;
       }
@@ -606,6 +769,7 @@ export class MapEditor {
     // 마우스 업
     window.addEventListener('mouseup', () => {
       this.isPanning = false;
+      this.isMinimapDragging = false;
       this.activeHandle = null;
       this.canvas.style.cursor = '';
     });
@@ -795,10 +959,21 @@ export class MapEditor {
     await this.testPhysics.init();
     this.testPhysics.createStage(this.stage);
 
+    // 출발 영역 기반 구슬 배치
+    const sp = this.getSpawnArea();
+    const cols = 4;
+    const rows = 3;
+    const marginX = sp.width * 0.15;
+    const marginY = sp.height * 0.15;
+    const spacingX = (sp.width - marginX * 2) / Math.max(cols - 1, 1);
+    const spacingY = (sp.height - marginY * 2) / Math.max(rows - 1, 1);
+
     this.testMarbles = [];
-    for (let i = 0; i < 12; i++) {
-      const x = 11 + (i % 4) * 0.8;
-      const y = 2 + Math.floor(i / 4) * 0.8;
+    for (let i = 0; i < cols * rows; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = sp.x + marginX + col * spacingX;
+      const y = sp.y + marginY + row * spacingY;
       const color = `hsl(${(i * 30) % 360}, 100%, 70%)`;
       this.testPhysics.createMarble(i, x, y);
       this.testMarbles.push({ id: i, color });
@@ -811,6 +986,7 @@ export class MapEditor {
   public stopTestPlay() {
     this.isTesting = false;
     if (this.testPhysics) {
+      this.testPhysics.clearMarbles();
       this.testPhysics.clear();
       this.testPhysics = null;
     }
@@ -866,6 +1042,8 @@ export class MapEditor {
     if (this.isTesting && this.testPhysics) {
       this.drawTestMarbles();
     }
+
+    this.drawMinimap();
   }
 
   private drawGrid() {
@@ -923,21 +1101,40 @@ export class MapEditor {
 
   private drawSpawnArea() {
     const ctx = this.ctx;
-    const p1 = this.worldToScreen(9.25, 0);
-    const p2 = this.worldToScreen(16.5, 6);
+    const sp = this.getSpawnArea();
+    const p1 = this.worldToScreen(sp.x, sp.y);
+    const p2 = this.worldToScreen(sp.x + sp.width, sp.y + sp.height);
+    const w = p2.x - p1.x;
+    const h = p2.y - p1.y;
+
+    const isDraggingSpawn = this.activeHandle?.type?.startsWith('spawn-') ?? false;
 
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 255, 200, 0.04)';
-    ctx.fillRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
+    ctx.fillStyle = isDraggingSpawn ? 'rgba(0, 255, 200, 0.08)' : 'rgba(0, 255, 200, 0.04)';
+    ctx.fillRect(p1.x, p1.y, w, h);
 
-    ctx.strokeStyle = 'rgba(0, 255, 200, 0.4)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = isDraggingSpawn ? 'rgba(0, 255, 200, 0.8)' : 'rgba(0, 255, 200, 0.4)';
+    ctx.lineWidth = isDraggingSpawn ? 2.5 : 1.5;
     ctx.setLineDash([6, 6]);
-    ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
+    ctx.strokeRect(p1.x, p1.y, w, h);
+    ctx.setLineDash([]);
+
+    // 4방향 에지 핸들 (리사이즈 표시)
+    const handleLen = Math.min(16, w * 0.3, h * 0.3);
+    ctx.fillStyle = isDraggingSpawn ? '#00ffcc' : 'rgba(0, 255, 200, 0.7)';
+    // Left
+    ctx.fillRect(p1.x - 3, p1.y + h / 2 - handleLen / 2, 6, handleLen);
+    // Right
+    ctx.fillRect(p2.x - 3, p1.y + h / 2 - handleLen / 2, 6, handleLen);
+    // Top
+    ctx.fillRect(p1.x + w / 2 - handleLen / 2, p1.y - 3, handleLen, 6);
+    // Bottom
+    ctx.fillRect(p1.x + w / 2 - handleLen / 2, p2.y - 3, handleLen, 6);
 
     ctx.fillStyle = 'rgba(0, 255, 200, 0.8)';
     ctx.font = 'bold 12px sans-serif';
-    ctx.fillText('▼ 구슬 출발 영역 (Spawn Zone)', p1.x + 8, p1.y + 8);
+    ctx.textBaseline = 'top';
+    ctx.fillText(`▼ 구슬 출발 영역 (${sp.width.toFixed(1)} × ${sp.height.toFixed(1)})`, p1.x + 8, p1.y + 8);
     ctx.restore();
   }
 
@@ -1230,5 +1427,127 @@ export class MapEditor {
 
       ctx.restore();
     });
+  }
+
+  // ================= 전체 지도 미니맵 (게임의 절반 비율: 2px/m) =================
+  private drawMinimap() {
+    const ctx = this.ctx;
+    const scale = this.MINIMAP_SCALE;
+    const mmW = this.MINIMAP_UNITS * scale; // 26 * 2 = 52px
+    const goalY = this.stage.goalY;
+    const mmH = Math.max(60, goalY * scale);
+    const mx = this.MINIMAP_X;
+    const my = this.MINIMAP_Y;
+
+    ctx.save();
+    // 1. 미니맵 배경
+    ctx.fillStyle = 'rgba(15, 18, 22, 0.88)';
+    ctx.fillRect(mx, my, mmW, mmH);
+
+    // 2. 미니맵 테두리 (게임 스타일)
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mx, my, mmW, mmH);
+
+    // 라벨
+    ctx.fillStyle = '#00e5ff';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('MAP', mx + mmW / 2, my - 3);
+
+    // 미니맵 영역 클리핑
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(mx, my, mmW, mmH);
+    ctx.clip();
+
+    ctx.translate(mx, my);
+    ctx.scale(scale, scale);
+
+    // 3. 출발 영역 미니맵 표시
+    const sp = this.getSpawnArea();
+    ctx.fillStyle = 'rgba(0, 255, 200, 0.3)';
+    ctx.fillRect(sp.x, sp.y, sp.width, sp.height);
+    ctx.strokeStyle = '#00ffcc';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(sp.x, sp.y, sp.width, sp.height);
+
+    // 4. 결승선(Goal Line) 표시
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, goalY);
+    ctx.lineTo(this.MINIMAP_UNITS, goalY);
+    ctx.stroke();
+
+    // 5. 모든 엔티티 렌더링
+    const entities = this.stage.entities || [];
+    entities.forEach((entity, idx) => {
+      const isSel = idx === this.selectedIndex;
+      ctx.save();
+      ctx.translate(entity.position.x, entity.position.y);
+
+      switch (entity.shape.type) {
+        case 'box': {
+          const w = entity.shape.width * 2;
+          const h = entity.shape.height * 2;
+          ctx.rotate(((entity.shape.rotation || 0) * Math.PI) / 180);
+          ctx.fillStyle = isSel ? '#ffffff' : entity.type === 'kinematic' ? '#ffd600' : '#00bcd4';
+          ctx.fillRect(-w / 2, -h / 2, w, h);
+          break;
+        }
+        case 'circle': {
+          ctx.fillStyle = isSel ? '#ffffff' : '#ffab00';
+          ctx.beginPath();
+          ctx.arc(0, 0, entity.shape.radius, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case 'polyline': {
+          ctx.rotate(((entity.shape.rotation || 0) * Math.PI) / 180);
+          ctx.strokeStyle = isSel ? '#ffffff' : 'rgba(255, 255, 255, 0.7)';
+          ctx.lineWidth = 1;
+          if (entity.shape.points.length > 1) {
+            ctx.beginPath();
+            ctx.moveTo(entity.shape.points[0][0], entity.shape.points[0][1]);
+            for (let i = 1; i < entity.shape.points.length; i++) {
+              ctx.lineTo(entity.shape.points[i][0], entity.shape.points[i][1]);
+            }
+            ctx.stroke();
+          }
+          break;
+        }
+      }
+      ctx.restore();
+    });
+
+    // 6. 테스트 구슬 표시
+    if (this.isTesting && this.testPhysics) {
+      this.testMarbles.forEach((m) => {
+        const pos = this.testPhysics!.getMarblePosition(m.id);
+        if (!pos) return;
+        ctx.fillStyle = m.color;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, 0.35, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    // 7. 현재 뷰포트 사각형 표시
+    const minW = this.screenToWorld(0, 0);
+    const maxW = this.screenToWorld(this.canvas.width, this.canvas.height);
+    const vpX = minW.x;
+    const vpY = minW.y;
+    const vpW = maxW.x - minW.x;
+    const vpH = maxW.y - minW.y;
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.2;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillRect(vpX, vpY, vpW, vpH);
+    ctx.strokeRect(vpX, vpY, vpW, vpH);
+
+    ctx.restore();
+    ctx.restore();
   }
 }

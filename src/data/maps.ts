@@ -13,6 +13,7 @@ export type StageDef = {
   goalY: number;
   zoomY: number;
   adBoards?: AdBoard[];
+  spawnArea?: { x: number; y: number; width: number; height: number };
 };
 
 export const stages: StageDef[] = [

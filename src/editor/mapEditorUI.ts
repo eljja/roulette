@@ -11,6 +11,10 @@ export class MapEditorUI {
   private titleInput!: HTMLInputElement;
   private goalYInput!: HTMLInputElement;
   private goalYSlider!: HTMLInputElement;
+  private spawnXInput!: HTMLInputElement;
+  private spawnYInput!: HTMLInputElement;
+  private spawnWInput!: HTMLInputElement;
+  private spawnHInput!: HTMLInputElement;
   private inspectorPanel!: HTMLElement;
   private testPlayBtn!: HTMLButtonElement;
 
@@ -24,7 +28,19 @@ export class MapEditorUI {
     this.editor = new MapEditor(canvas, initialStage);
 
     this.bindEditorEvents();
+    this.syncInitialStage();
     this.updateInspector(null, null);
+  }
+
+  private syncInitialStage() {
+    this.titleInput.value = this.editor.stage.title;
+    this.goalYInput.value = this.editor.stage.goalY.toString();
+    this.goalYSlider.value = this.editor.stage.goalY.toString();
+    const sp = this.editor.getSpawnArea();
+    this.spawnXInput.value = sp.x.toString();
+    this.spawnYInput.value = sp.y.toString();
+    this.spawnWInput.value = sp.width.toString();
+    this.spawnHInput.value = sp.height.toString();
   }
 
   private renderLayout() {
@@ -39,8 +55,9 @@ export class MapEditorUI {
             <button id="btnResetView" title="뷰 리셋">⌖</button>
           </div>
           <div class="canvas-hints">
+            <span>🗺️ 미니맵: 클릭/드래그 이동</span>
             <span>🖱️ 좌클릭: 선택/이동</span>
-            <span>🖐️ 우클릭 드래그: 화면 이동</span>
+            <span>🖐️ 우클릭: 화면 이동</span>
             <span>🔍 휠: 줌</span>
             <span>⌨️ Del: 삭제</span>
             <span>Ctrl+D: 복제</span>
@@ -99,6 +116,23 @@ export class MapEditorUI {
                   ${stages.map((st, i) => `<option value="${i}">${st.title}</option>`).join('')}
                 </select>
               </div>
+              <div class="form-row">
+                <label>출발 영역 위치 (X, Y)</label>
+                <div class="dual-inputs">
+                  <input type="number" id="inSpawnX" step="0.25" value="9.25" />
+                  <input type="number" id="inSpawnY" step="0.25" value="0.0" />
+                </div>
+              </div>
+              <div class="form-row">
+                <label>출발 영역 크기 (너비 × 높이)</label>
+                <div class="dual-inputs">
+                  <input type="number" id="inSpawnW" min="1" step="0.25" value="7.25" />
+                  <input type="number" id="inSpawnH" min="1" step="0.25" value="6.0" />
+                </div>
+              </div>
+              <div class="inspector-hint" style="margin-top: 6px;">
+                💡 캔버스에서 <strong>출발 영역(민트색 박스)</strong>의 테두리를 잡고 드래그하면 크기와 위치를 직접 조절할 수 있습니다.
+              </div>
             </div>
 
             <!-- 2. 드래그 앤 드롭 아이템 팔레트 -->
@@ -139,10 +173,22 @@ export class MapEditorUI {
     this.titleInput = this.container.querySelector('#inMapTitle') as HTMLInputElement;
     this.goalYInput = this.container.querySelector('#inGoalY') as HTMLInputElement;
     this.goalYSlider = this.container.querySelector('#sliderGoalY') as HTMLInputElement;
+    this.spawnXInput = this.container.querySelector('#inSpawnX') as HTMLInputElement;
+    this.spawnYInput = this.container.querySelector('#inSpawnY') as HTMLInputElement;
+    this.spawnWInput = this.container.querySelector('#inSpawnW') as HTMLInputElement;
+    this.spawnHInput = this.container.querySelector('#inSpawnH') as HTMLInputElement;
     this.inspectorPanel = this.container.querySelector('#inspectorContent') as HTMLElement;
     this.testPlayBtn = this.container.querySelector('#btnTestPlay') as HTMLButtonElement;
 
     this.bindDomEvents();
+  }
+
+  private updateSpawnInputs() {
+    const sp = this.editor.getSpawnArea();
+    if (this.spawnXInput) this.spawnXInput.value = sp.x.toString();
+    if (this.spawnYInput) this.spawnYInput.value = sp.y.toString();
+    if (this.spawnWInput) this.spawnWInput.value = sp.width.toString();
+    if (this.spawnHInput) this.spawnHInput.value = sp.height.toString();
   }
 
   private bindDomEvents() {
@@ -165,6 +211,26 @@ export class MapEditorUI {
     this.goalYSlider.addEventListener('input', () => updateGoalY(parseFloat(this.goalYSlider.value)));
     this.goalYInput.addEventListener('change', () => updateGoalY(parseFloat(this.goalYInput.value) || 90));
 
+    // 출발 영역 변경 핸들러
+    const onSpawnInputChange = () => {
+      const sp = this.editor.getSpawnArea();
+      const x = parseFloat(this.spawnXInput.value);
+      const y = parseFloat(this.spawnYInput.value);
+      const w = Math.max(1, parseFloat(this.spawnWInput.value) || 1);
+      const h = Math.max(1, parseFloat(this.spawnHInput.value) || 1);
+      if (!Number.isNaN(x)) sp.x = x;
+      if (!Number.isNaN(y)) sp.y = y;
+      sp.width = w;
+      sp.height = h;
+      this.editor.stage.spawnArea = sp;
+      this.editor.onStageChange?.(this.editor.stage);
+    };
+
+    this.spawnXInput.addEventListener('change', onSpawnInputChange);
+    this.spawnYInput.addEventListener('change', onSpawnInputChange);
+    this.spawnWInput.addEventListener('change', onSpawnInputChange);
+    this.spawnHInput.addEventListener('change', onSpawnInputChange);
+
     // 공식 맵 불러와서 편집
     const sltOfficial = this.container.querySelector('#sltOfficialMap') as HTMLSelectElement;
     sltOfficial.addEventListener('change', (e) => {
@@ -175,7 +241,10 @@ export class MapEditorUI {
           this.titleInput.value = `${this.editor.stage.title} (수정본)`;
           this.editor.stage.title = this.titleInput.value;
           updateGoalY(this.editor.stage.goalY);
+          this.updateSpawnInputs();
+          this.showToast(`'${stages[idx].title}' 맵을 불러왔습니다!`);
         }
+        sltOfficial.value = ''; // 동일 맵 다시 선택 가능하도록 리셋
       }
     });
 
@@ -202,18 +271,27 @@ export class MapEditorUI {
       this.editor.zoom = 24;
     });
 
-    // 테스트 플레이 토글
-    const toggleTestPlay = () => {
+    // 테스트 플레이 토글 (비동기 안전 처리 및 로딩 상태 피드백)
+    const toggleTestPlay = async () => {
       if (this.editor.isTesting) {
         this.editor.stopTestPlay();
         this.testPlayBtn.innerHTML = '<span>▶️ 굴려보기</span>';
         this.testPlayBtn.classList.remove('active');
         this.container.querySelector('#testModeBanner')?.classList.add('hide');
       } else {
-        this.editor.startTestPlay();
-        this.testPlayBtn.innerHTML = '<span>⏹️ 테스트 정지</span>';
-        this.testPlayBtn.classList.add('active');
-        this.container.querySelector('#testModeBanner')?.classList.remove('hide');
+        this.testPlayBtn.innerHTML = '<span>⏳ 구슬 준비 중...</span>';
+        try {
+          await this.editor.startTestPlay();
+          this.testPlayBtn.innerHTML = '<span>⏹️ 테스트 정지</span>';
+          this.testPlayBtn.classList.add('active');
+          this.container.querySelector('#testModeBanner')?.classList.remove('hide');
+        } catch (err: any) {
+          console.error('Test play failed:', err);
+          this.editor.stopTestPlay();
+          this.testPlayBtn.innerHTML = '<span>▶️ 굴려보기</span>';
+          this.testPlayBtn.classList.remove('active');
+          alert(`굴려보기 실행 실패: ${err?.message || err}`);
+        }
       }
     };
 
@@ -250,6 +328,7 @@ export class MapEditorUI {
           this.editor.setStage(loaded);
           this.titleInput.value = loaded.title || '불러온 맵';
           updateGoalY(loaded.goalY);
+          this.updateSpawnInputs();
           this.showToast('📂 맵을 성공적으로 불러왔습니다!');
         } catch (err: any) {
           alert(`맵 불러오기 실패: ${err.message}`);
@@ -276,6 +355,7 @@ export class MapEditorUI {
       this.titleInput.value = stage.title;
       this.goalYInput.value = stage.goalY.toString();
       this.goalYSlider.value = stage.goalY.toString();
+      this.updateSpawnInputs();
     };
   }
 

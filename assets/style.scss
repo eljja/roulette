@@ -651,7 +651,7 @@ div.toast {
   .canvas-floating-controls {
     position: absolute;
     top: 1rem;
-    left: 1rem;
+    left: 78px;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -1004,6 +1004,21 @@ div.toast {
       font-size: 11px;
       margin-bottom: 10px;
       border-left: 3px solid #00e5ff;
+    }
+
+    .inspector-hint {
+      background: rgba(255, 215, 0, 0.08);
+      border-left: 3px solid #ffd700;
+      color: #ffe082;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      line-height: 1.4;
+      margin: 8px 0;
+
+      strong {
+        color: #fff;
+      }
     }
 
     .inspector-buttons {

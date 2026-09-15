@@ -54,12 +54,20 @@ export class Box2dPhysics implements IPhysics {
 
       let shape;
       switch (entity.shape.type) {
-        case 'box':
+        case 'box': {
           shape = new this.Box2D.b2PolygonShape();
-          shape.SetAsBox(entity.shape.width, entity.shape.height, 0, entity.shape.rotation);
+          const rotDeg = entity.shape.rotation || 0;
+          if (rotDeg !== 0) {
+            const rad = (rotDeg * Math.PI) / 180;
+            const center = new this.Box2D.b2Vec2(0, 0);
+            shape.SetAsBox(entity.shape.width, entity.shape.height, center, rad);
+          } else {
+            shape.SetAsBox(entity.shape.width, entity.shape.height);
+          }
           fixtureDef.set_shape(shape);
           body.CreateFixture(fixtureDef);
           break;
+        }
         case 'polyline':
           shape = new this.Box2D.b2EdgeShape();
           for (let i = 0; i < entity.shape.points.length - 1; i++) {
