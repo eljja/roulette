@@ -651,7 +651,7 @@ div.toast {
   .canvas-floating-controls {
     position: absolute;
     top: 1rem;
-    left: 78px;
+    left: 134px;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -784,6 +784,11 @@ div.toast {
     padding: 10px 14px 4px 14px;
 
     &.secondary {
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
+
+    &.tertiary {
       padding-top: 4px;
       padding-bottom: 10px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);

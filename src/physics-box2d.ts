@@ -3,6 +3,8 @@ import type { StageDef } from './data/maps';
 import type { IPhysics } from './IPhysics';
 import type { MapEntity, MapEntityState } from './types/MapEntity.type';
 
+let cachedBox2DModule: any = null;
+
 export class Box2dPhysics implements IPhysics {
   private Box2D!: typeof Box2D & EmscriptenModule;
   private gravity!: Box2D.b2Vec2;
@@ -14,7 +16,10 @@ export class Box2dPhysics implements IPhysics {
   private deleteCandidates: Box2D.b2Body[] = [];
 
   async init(): Promise<void> {
-    this.Box2D = await Box2DFactory();
+    if (!cachedBox2DModule) {
+      cachedBox2DModule = await Box2DFactory();
+    }
+    this.Box2D = cachedBox2DModule;
     this.gravity = new this.Box2D.b2Vec2(0, 10);
     this.world = new this.Box2D.b2World(this.gravity);
     console.log('box2d ready');
@@ -25,6 +30,7 @@ export class Box2dPhysics implements IPhysics {
   }
 
   clearMarbles(): void {
+    if (!this.world) return;
     Object.values(this.marbleMap).forEach((body) => {
       this.world.DestroyBody(body);
     });
@@ -56,13 +62,15 @@ export class Box2dPhysics implements IPhysics {
       switch (entity.shape.type) {
         case 'box': {
           shape = new this.Box2D.b2PolygonShape();
+          const w = Math.max(0.01, entity.shape.width);
+          const h = Math.max(0.01, entity.shape.height);
           const rotDeg = entity.shape.rotation || 0;
           if (rotDeg !== 0) {
             const rad = (rotDeg * Math.PI) / 180;
             const center = new this.Box2D.b2Vec2(0, 0);
-            shape.SetAsBox(entity.shape.width, entity.shape.height, center, rad);
+            shape.SetAsBox(w, h, center, rad);
           } else {
-            shape.SetAsBox(entity.shape.width, entity.shape.height);
+            shape.SetAsBox(w, h);
           }
           fixtureDef.set_shape(shape);
           body.CreateFixture(fixtureDef);
@@ -73,6 +81,7 @@ export class Box2dPhysics implements IPhysics {
           for (let i = 0; i < entity.shape.points.length - 1; i++) {
             const p1 = entity.shape.points[i];
             const p2 = entity.shape.points[i + 1];
+            if (p1[0] === p2[0] && p1[1] === p2[1]) continue;
             const v1 = new this.Box2D.b2Vec2(p1[0], p1[1]);
             const v2 = new this.Box2D.b2Vec2(p2[0], p2[1]);
             const edge = new this.Box2D.b2EdgeShape();
@@ -82,7 +91,7 @@ export class Box2dPhysics implements IPhysics {
           break;
         case 'circle':
           shape = new this.Box2D.b2CircleShape();
-          shape.set_m_radius(entity.shape.radius);
+          shape.set_m_radius(Math.max(0.01, entity.shape.radius));
           fixtureDef.set_shape(shape);
           body.CreateFixture(fixtureDef);
           break;
@@ -102,6 +111,7 @@ export class Box2dPhysics implements IPhysics {
   }
 
   clearEntities() {
+    if (!this.world) return;
     this.entities.forEach((entity) => {
       this.world.DestroyBody(entity.body);
     });
@@ -186,6 +196,7 @@ export class Box2dPhysics implements IPhysics {
   }
 
   step(deltaSeconds: number): void {
+    if (!this.world) return;
     this.deleteCandidates.forEach((body) => {
       this.world.DestroyBody(body);
     });

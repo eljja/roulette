@@ -59,6 +59,7 @@ export class MapEditor {
   public selectedIndex: number | null = null;
   public onSelectionChange?: (entity: MapEntity | null, index: number | null) => void;
   public onStageChange?: (stage: StageDef) => void;
+  public onToast?: (message: string) => void;
 
   // 뷰포트 상태 (월드 좌표)
   public viewX = 13;
@@ -71,15 +72,25 @@ export class MapEditor {
   private activeHandle: ActiveHandleState | null = null;
   private hoveredHandle: { type: HandleType; vertexIndex?: number } | null = null;
 
-  // 미니맵 설정 (기존 게임 4px/m 대비 절반 비율: 2px/m)
-  private readonly MINIMAP_SCALE = 2;
+  // 미니맵 설정 (기존 2px/m의 2배인 4px/m, 기존 게임과 동일한 104px 폭)
+  private readonly MINIMAP_SCALE = 4;
   private readonly MINIMAP_UNITS = 26;
   private readonly MINIMAP_X = 16;
   private readonly MINIMAP_Y = 16;
   private isMinimapDragging = false;
 
+  // 실행 취소 / 다시 실행 (Undo / Redo)
+  private undoStack: string[] = [];
+  private redoStack: string[] = [];
+  private readonly MAX_HISTORY = 40;
+
+  // 복사 / 붙여넣기 (Ctrl+C / Ctrl+V)
+  private copiedEntity: MapEntity | null = null;
+  public lastMouseWorldPos: VectorLike = { x: 13, y: 10 };
+
   // 테스트 플레이 상태
   public isTesting = false;
+  private isPhysicsReady = false;
   private testPhysics: Box2dPhysics | null = null;
   private testMarbles: { id: number; color: string }[] = [];
   private testAnimFrame = 0;
@@ -155,6 +166,7 @@ export class MapEditor {
   }
 
   public setStage(newStage: StageDef) {
+    this.saveHistory();
     this.stage = JSON.parse(JSON.stringify(newStage));
     this.selectedIndex = null;
     this.activeHandle = null;
@@ -175,6 +187,81 @@ export class MapEditor {
       this.stage.spawnArea = { x: 9.25, y: 0, width: 7.25, height: 6 };
     }
     return this.stage.spawnArea;
+  }
+
+  // ================= 히스토리 (Undo / Redo) =================
+  public saveHistory() {
+    const snap = JSON.stringify(this.stage);
+    if (this.undoStack.length > 0 && this.undoStack[this.undoStack.length - 1] === snap) {
+      return;
+    }
+    this.undoStack.push(snap);
+    if (this.undoStack.length > this.MAX_HISTORY) {
+      this.undoStack.shift();
+    }
+    this.redoStack = [];
+  }
+
+  public undo(): boolean {
+    if (this.undoStack.length === 0) return false;
+    const currentSnap = JSON.stringify(this.stage);
+    this.redoStack.push(currentSnap);
+    const prevSnap = this.undoStack.pop()!;
+    this.stage = JSON.parse(prevSnap);
+    if (this.selectedIndex !== null && (!this.stage.entities || this.selectedIndex >= this.stage.entities.length)) {
+      this.selectedIndex = null;
+    }
+    const currentEntity = this.selectedIndex !== null ? (this.stage.entities?.[this.selectedIndex] ?? null) : null;
+    this.activeHandle = null;
+    this.onSelectionChange?.(currentEntity, this.selectedIndex);
+    this.onStageChange?.(this.stage);
+    this.onToast?.('↩️ 실행 취소 (Undo)');
+    return true;
+  }
+
+  public redo(): boolean {
+    if (this.redoStack.length === 0) return false;
+    const currentSnap = JSON.stringify(this.stage);
+    this.undoStack.push(currentSnap);
+    const nextSnap = this.redoStack.pop()!;
+    this.stage = JSON.parse(nextSnap);
+    if (this.selectedIndex !== null && (!this.stage.entities || this.selectedIndex >= this.stage.entities.length)) {
+      this.selectedIndex = null;
+    }
+    const currentEntity = this.selectedIndex !== null ? (this.stage.entities?.[this.selectedIndex] ?? null) : null;
+    this.activeHandle = null;
+    this.onSelectionChange?.(currentEntity, this.selectedIndex);
+    this.onStageChange?.(this.stage);
+    this.onToast?.('↪️ 다시 실행 (Redo)');
+    return true;
+  }
+
+  // ================= 클립보드 (Ctrl+C / Ctrl+V) =================
+  public copySelectedEntity(): boolean {
+    if (this.selectedIndex === null || !this.stage.entities?.[this.selectedIndex]) return false;
+    this.copiedEntity = JSON.parse(JSON.stringify(this.stage.entities[this.selectedIndex]));
+    this.onToast?.('⧉ 아이템이 복사되었습니다 (Ctrl+V로 붙여넣기)');
+    return true;
+  }
+
+  public pasteEntity(): boolean {
+    if (!this.copiedEntity) return false;
+    this.saveHistory();
+    const cloned: MapEntity = JSON.parse(JSON.stringify(this.copiedEntity));
+    // 마우스 위치 기준으로 붙여넣거나, 기존 위치에서 +1 오프셋
+    cloned.position.x += 1.0;
+    cloned.position.y += 1.0;
+
+    if (!this.stage.entities) {
+      this.stage.entities = [];
+    }
+    this.stage.entities.push(cloned);
+    this.selectedIndex = this.stage.entities.length - 1;
+    this.activeHandle = null;
+    this.onSelectionChange?.(cloned, this.selectedIndex);
+    this.onStageChange?.(this.stage);
+    this.onToast?.('📋 아이템을 붙여넣었습니다.');
+    return true;
   }
 
   // 월드 <-> 스크린 변환
@@ -347,12 +434,14 @@ export class MapEditor {
 
       if (e.button === 0) {
         // 0. 미니맵 클릭 검사 (뷰포트 이동)
-        const mmW = this.MINIMAP_UNITS * this.MINIMAP_SCALE;
-        const mmH = Math.max(60, this.stage.goalY * this.MINIMAP_SCALE);
+        const goalY = this.stage.goalY;
+        const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
+        const mmW = this.MINIMAP_UNITS * mmScale;
+        const mmH = Math.max(80, goalY * mmScale);
         if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
           this.isMinimapDragging = true;
-          this.viewX = (sx - this.MINIMAP_X) / this.MINIMAP_SCALE;
-          this.viewY = (sy - this.MINIMAP_Y) / this.MINIMAP_SCALE;
+          this.viewX = (sx - this.MINIMAP_X) / mmScale;
+          this.viewY = (sy - this.MINIMAP_Y) / mmScale;
           return;
         }
 
@@ -362,6 +451,7 @@ export class MapEditor {
           const handle = this.hitTestHandle(selEntity, world.x, world.y, sx, sy);
 
           if (handle) {
+            this.saveHistory();
             const bShape = selEntity.shape.type === 'box' ? (selEntity.shape as EntityBoxShape) : null;
             const cShape = selEntity.shape.type === 'circle' ? (selEntity.shape as EntityCircleShape) : null;
 
@@ -381,6 +471,7 @@ export class MapEditor {
 
         // 2. 골 라인 조작 체크
         if (Math.abs(world.y - this.stage.goalY) < 1.0) {
+          this.saveHistory();
           this.activeHandle = {
             type: 'goal',
             startWorld: { x: world.x, y: world.y },
@@ -416,6 +507,7 @@ export class MapEditor {
 
           // 에지 핸들 검사
           if (inY && Math.abs(world.x - left) <= tolW) {
+            this.saveHistory();
             this.activeHandle = { ...spawnHandleBase, type: 'spawn-left' };
             this.selectedIndex = null;
             this.onSelectionChange?.(null, null);
@@ -423,6 +515,7 @@ export class MapEditor {
             return;
           }
           if (inY && Math.abs(world.x - right) <= tolW) {
+            this.saveHistory();
             this.activeHandle = { ...spawnHandleBase, type: 'spawn-right' };
             this.selectedIndex = null;
             this.onSelectionChange?.(null, null);
@@ -430,6 +523,7 @@ export class MapEditor {
             return;
           }
           if (inX && Math.abs(world.y - top) <= tolW) {
+            this.saveHistory();
             this.activeHandle = { ...spawnHandleBase, type: 'spawn-top' };
             this.selectedIndex = null;
             this.onSelectionChange?.(null, null);
@@ -437,6 +531,7 @@ export class MapEditor {
             return;
           }
           if (inX && Math.abs(world.y - bottom) <= tolW) {
+            this.saveHistory();
             this.activeHandle = { ...spawnHandleBase, type: 'spawn-bottom' };
             this.selectedIndex = null;
             this.onSelectionChange?.(null, null);
@@ -446,6 +541,7 @@ export class MapEditor {
 
           // 영역 내부 클릭: 전체 이동
           if (world.x > left + tolW && world.x < right - tolW && world.y > top + tolW && world.y < bottom - tolW) {
+            this.saveHistory();
             this.activeHandle = { ...spawnHandleBase, type: 'spawn-body' };
             this.selectedIndex = null;
             this.onSelectionChange?.(null, null);
@@ -467,7 +563,20 @@ export class MapEditor {
 
         this.selectedIndex = hitIndex;
         if (hitIndex !== null) {
-          const ent = entities[hitIndex];
+          let ent = entities[hitIndex];
+
+          // Ctrl + 클릭/드래그: 즉시 복제하여 복제본을 드래그 대상으로 설정
+          if (e.ctrlKey || e.metaKey) {
+            this.saveHistory();
+            const cloned: MapEntity = JSON.parse(JSON.stringify(ent));
+            entities.push(cloned);
+            hitIndex = entities.length - 1;
+            this.selectedIndex = hitIndex;
+            ent = cloned;
+          } else {
+            this.saveHistory();
+          }
+
           const bShape = ent.shape.type === 'box' ? (ent.shape as EntityBoxShape) : null;
           const cShape = ent.shape.type === 'circle' ? (ent.shape as EntityCircleShape) : null;
 
@@ -495,6 +604,7 @@ export class MapEditor {
       const sx = (e.clientX - rect.left) * dpr;
       const sy = (e.clientY - rect.top) * dpr;
       const world = this.screenToWorld(sx, sy);
+      this.lastMouseWorldPos = { x: world.x, y: world.y };
 
       // 뷰 이동(Pan) 중
       if (this.isPanning) {
@@ -508,14 +618,18 @@ export class MapEditor {
 
       // 미니맵 드래그 중 (뷰포트 추적 이동)
       if (this.isMinimapDragging) {
-        this.viewX = (sx - this.MINIMAP_X) / this.MINIMAP_SCALE;
-        this.viewY = (sy - this.MINIMAP_Y) / this.MINIMAP_SCALE;
+        const goalY = this.stage.goalY;
+        const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
+        this.viewX = (sx - this.MINIMAP_X) / mmScale;
+        this.viewY = (sy - this.MINIMAP_Y) / mmScale;
         return;
       }
 
       // 미니맵 영역 마우스 호버 커서
-      const mmW = this.MINIMAP_UNITS * this.MINIMAP_SCALE;
-      const mmH = Math.max(60, this.stage.goalY * this.MINIMAP_SCALE);
+      const goalY = this.stage.goalY;
+      const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
+      const mmW = this.MINIMAP_UNITS * mmScale;
+      const mmH = Math.max(80, goalY * mmScale);
       if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
         this.canvas.style.cursor = 'pointer';
         return;
@@ -614,6 +728,18 @@ export class MapEditor {
         const dy = world.y - handle.startWorld.y;
 
         if (handle.type === 'spawn-body') {
+          let dx = world.x - handle.startWorld.x;
+          let dy = world.y - handle.startWorld.y;
+
+          // Shift 키: X축 또는 Y축 단일 방향으로만 이동 제한
+          if (e.shiftKey) {
+            if (Math.abs(dx) >= Math.abs(dy)) {
+              dy = 0;
+            } else {
+              dx = 0;
+            }
+          }
+
           sp.x = Math.round((s.x + dx) * 4) / 4;
           sp.y = Math.round((s.y + dy) * 4) / 4;
         } else if (handle.type === 'spawn-left') {
@@ -643,9 +769,23 @@ export class MapEditor {
       if (handle.type === 'vertex' && handle.vertexIndex !== undefined && shape.type === 'polyline') {
         const poly = shape as EntityPolylineShape;
         if (poly.points[handle.vertexIndex]) {
+          let targetWx = world.x;
+          let targetWy = world.y;
+
+          // Shift 키: X축 또는 Y축 단일 방향으로만 정점 이동 제한
+          if (e.shiftKey) {
+            const dx = world.x - handle.startWorld.x;
+            const dy = world.y - handle.startWorld.y;
+            if (Math.abs(dx) >= Math.abs(dy)) {
+              targetWy = handle.startWorld.y;
+            } else {
+              targetWx = handle.startWorld.x;
+            }
+          }
+
           // 0.25 단위 좌표 스냅
-          const snapWx = Math.round(world.x * 4) / 4;
-          const snapWy = Math.round(world.y * 4) / 4;
+          const snapWx = Math.round(targetWx * 4) / 4;
+          const snapWy = Math.round(targetWy * 4) / 4;
           poly.points[handle.vertexIndex][0] = snapWx - entity.position.x;
           poly.points[handle.vertexIndex][1] = snapWy - entity.position.y;
           this.onSelectionChange?.(entity, this.selectedIndex);
@@ -752,8 +892,18 @@ export class MapEditor {
 
       // 5. 전체 엔티티 이동 (Body Drag)
       if (handle.type === 'body') {
-        const dx = world.x - handle.startWorld.x;
-        const dy = world.y - handle.startWorld.y;
+        let dx = world.x - handle.startWorld.x;
+        let dy = world.y - handle.startWorld.y;
+
+        // Shift 키: X축 또는 Y축 단일 방향으로만 이동 제한
+        if (e.shiftKey) {
+          if (Math.abs(dx) >= Math.abs(dy)) {
+            dy = 0;
+          } else {
+            dx = 0;
+          }
+        }
+
         let nx = handle.entityStartPos.x + dx;
         let ny = handle.entityStartPos.y + dy;
         nx = Math.round(nx * 4) / 4;
@@ -793,6 +943,7 @@ export class MapEditor {
         const ptS = this.worldToScreen(entity.position.x + p[0], entity.position.y + p[1]);
         if (Math.hypot(sx - ptS.x, sy - ptS.y) <= 12) {
           if (poly.points.length > 2) {
+            this.saveHistory();
             poly.points.splice(i, 1);
             this.onSelectionChange?.(entity, this.selectedIndex);
             this.onStageChange?.(this.stage);
@@ -810,6 +961,7 @@ export class MapEditor {
 
         const distToSegment = this.distancePointToSegment(world, w1, w2);
         if (distToSegment <= 0.8) {
+          this.saveHistory();
           const snapWx = Math.round(world.x * 4) / 4;
           const snapWy = Math.round(world.y * 4) / 4;
           poly.points.splice(i + 1, 0, [snapWx - entity.position.x, snapWy - entity.position.y]);
@@ -854,6 +1006,7 @@ export class MapEditor {
           props: JSON.parse(JSON.stringify(template.defaultProps)),
         };
 
+        this.saveHistory();
         if (!this.stage.entities) {
           this.stage.entities = [];
         }
@@ -871,14 +1024,53 @@ export class MapEditor {
     window.addEventListener('keydown', (e: KeyboardEvent) => {
       if (this.isTesting) return;
       const tag = (document.activeElement as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
+      const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+
+      // Ctrl + Z: 실행 취소 (Undo)
+      if (isCtrlOrMeta && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        this.undo();
+        return;
+      }
+
+      // Ctrl + Y 또는 Ctrl + Shift + Z: 다시 실행 (Redo)
+      if (
+        (isCtrlOrMeta && e.key.toLowerCase() === 'y') ||
+        (isCtrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'z')
+      ) {
+        e.preventDefault();
+        this.redo();
+        return;
+      }
+
+      // Ctrl + C: 선택 아이템 복사
+      if (isCtrlOrMeta && e.key.toLowerCase() === 'c' && this.selectedIndex !== null) {
+        e.preventDefault();
+        this.copySelectedEntity();
+        return;
+      }
+
+      // Ctrl + V: 아이템 붙여넣기
+      if (isCtrlOrMeta && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        this.pasteEntity();
+        return;
+      }
+
+      // Delete / Backspace: 아이템 삭제
       if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedIndex !== null) {
         e.preventDefault();
         this.deleteSelectedEntity();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === 'd' && this.selectedIndex !== null) {
+        return;
+      }
+
+      // Ctrl + D: 아이템 복제
+      if (isCtrlOrMeta && e.key.toLowerCase() === 'd' && this.selectedIndex !== null) {
         e.preventDefault();
         this.duplicateSelectedEntity();
+        return;
       }
     });
   }
@@ -899,15 +1091,18 @@ export class MapEditor {
 
   public deleteSelectedEntity() {
     if (this.selectedIndex === null || !this.stage.entities) return;
+    this.saveHistory();
     this.stage.entities.splice(this.selectedIndex, 1);
     this.selectedIndex = null;
     this.activeHandle = null;
     this.onSelectionChange?.(null, null);
     this.onStageChange?.(this.stage);
+    this.onToast?.('🗑️ 아이템이 삭제되었습니다.');
   }
 
   public duplicateSelectedEntity() {
     if (this.selectedIndex === null || !this.stage.entities) return;
+    this.saveHistory();
     const original = this.stage.entities[this.selectedIndex];
     const clone: MapEntity = JSON.parse(JSON.stringify(original));
     clone.position.x += 1;
@@ -917,6 +1112,7 @@ export class MapEditor {
     this.activeHandle = null;
     this.onSelectionChange?.(clone, this.selectedIndex);
     this.onStageChange?.(this.stage);
+    this.onToast?.('⧉ 아이템이 복제되었습니다.');
   }
 
   private hitTest(entity: MapEntity, wx: number, wy: number): boolean {
@@ -950,41 +1146,50 @@ export class MapEditor {
   // ================= 테스트 플레이 기능 =================
   public async startTestPlay() {
     if (this.isTesting) return;
+    this.isPhysicsReady = false;
     this.isTesting = true;
     this.selectedIndex = null;
     this.activeHandle = null;
     this.onSelectionChange?.(null, null);
 
-    this.testPhysics = new Box2dPhysics();
-    await this.testPhysics.init();
-    this.testPhysics.createStage(this.stage);
+    try {
+      const physics = new Box2dPhysics();
+      await physics.init();
+      physics.createStage(this.stage);
 
-    // 출발 영역 기반 구슬 배치
-    const sp = this.getSpawnArea();
-    const cols = 4;
-    const rows = 3;
-    const marginX = sp.width * 0.15;
-    const marginY = sp.height * 0.15;
-    const spacingX = (sp.width - marginX * 2) / Math.max(cols - 1, 1);
-    const spacingY = (sp.height - marginY * 2) / Math.max(rows - 1, 1);
+      // 출발 영역 기반 구슬 배치
+      const sp = this.getSpawnArea();
+      const cols = 4;
+      const rows = 3;
+      const marginX = sp.width * 0.15;
+      const marginY = sp.height * 0.15;
+      const spacingX = (sp.width - marginX * 2) / Math.max(cols - 1, 1);
+      const spacingY = (sp.height - marginY * 2) / Math.max(rows - 1, 1);
 
-    this.testMarbles = [];
-    for (let i = 0; i < cols * rows; i++) {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const x = sp.x + marginX + col * spacingX;
-      const y = sp.y + marginY + row * spacingY;
-      const color = `hsl(${(i * 30) % 360}, 100%, 70%)`;
-      this.testPhysics.createMarble(i, x, y);
-      this.testMarbles.push({ id: i, color });
+      this.testMarbles = [];
+      for (let i = 0; i < cols * rows; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = sp.x + marginX + col * spacingX;
+        const y = sp.y + marginY + row * spacingY;
+        const color = `hsl(${(i * 30) % 360}, 100%, 70%)`;
+        physics.createMarble(i, x, y);
+        this.testMarbles.push({ id: i, color });
+      }
+
+      physics.start();
+      this.testPhysics = physics;
+      this.testLastTime = performance.now();
+      this.isPhysicsReady = true;
+    } catch (err) {
+      this.stopTestPlay();
+      throw err;
     }
-
-    this.testPhysics.start();
-    this.testLastTime = performance.now();
   }
 
   public stopTestPlay() {
     this.isTesting = false;
+    this.isPhysicsReady = false;
     if (this.testPhysics) {
       this.testPhysics.clearMarbles();
       this.testPhysics.clear();
@@ -999,13 +1204,18 @@ export class MapEditor {
     const render = (time: number) => {
       if (!this.isRunning) return;
 
-      if (this.isTesting && this.testPhysics) {
+      if (this.isTesting && this.isPhysicsReady && this.testPhysics) {
+        if (!this.testLastTime) this.testLastTime = time;
         const dt = Math.min(time - this.testLastTime, 50);
         this.testLastTime = time;
         const subSteps = 2;
         const subStepSec = dt / 1000 / subSteps;
-        for (let i = 0; i < subSteps; i++) {
-          this.testPhysics.step(subStepSec);
+        try {
+          for (let i = 0; i < subSteps; i++) {
+            this.testPhysics.step(subStepSec);
+          }
+        } catch (err) {
+          console.error('Physics step error:', err);
         }
       }
 
@@ -1183,7 +1393,13 @@ export class MapEditor {
         case 'box': {
           const w = shape.width * 2 * this.zoom;
           const h = shape.height * 2 * this.zoom;
-          const rad = (shape.rotation * Math.PI) / 180;
+          let rad = (shape.rotation * Math.PI) / 180;
+          if (this.isTesting && this.isPhysicsReady && this.testPhysics && entity.type === 'kinematic') {
+            const physEntities = this.testPhysics.getEntities();
+            if (physEntities[index]) {
+              rad = physEntities[index].angle;
+            }
+          }
           ctx.rotate(rad);
 
           const isKinematic = entity.type === 'kinematic';
@@ -1429,13 +1645,13 @@ export class MapEditor {
     });
   }
 
-  // ================= 전체 지도 미니맵 (게임의 절반 비율: 2px/m) =================
+  // ================= 전체 지도 미니맵 (104px 폭, 게임과 동일한 4px/m) =================
   private drawMinimap() {
     const ctx = this.ctx;
-    const scale = this.MINIMAP_SCALE;
-    const mmW = this.MINIMAP_UNITS * scale; // 26 * 2 = 52px
     const goalY = this.stage.goalY;
-    const mmH = Math.max(60, goalY * scale);
+    const scale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
+    const mmW = this.MINIMAP_UNITS * scale; // 26 * 4 = 104px
+    const mmH = Math.max(80, goalY * scale);
     const mx = this.MINIMAP_X;
     const my = this.MINIMAP_Y;
 
@@ -1451,9 +1667,9 @@ export class MapEditor {
 
     // 라벨
     ctx.fillStyle = '#00e5ff';
-    ctx.font = 'bold 9px sans-serif';
+    ctx.font = 'bold 10px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('MAP', mx + mmW / 2, my - 3);
+    ctx.fillText('MINIMAP', mx + mmW / 2, my - 4);
 
     // 미니맵 영역 클리핑
     ctx.save();
@@ -1491,7 +1707,14 @@ export class MapEditor {
         case 'box': {
           const w = entity.shape.width * 2;
           const h = entity.shape.height * 2;
-          ctx.rotate(((entity.shape.rotation || 0) * Math.PI) / 180);
+          let rad = ((entity.shape.rotation || 0) * Math.PI) / 180;
+          if (this.isTesting && this.isPhysicsReady && this.testPhysics && entity.type === 'kinematic') {
+            const physEntities = this.testPhysics.getEntities();
+            if (physEntities[idx]) {
+              rad = physEntities[idx].angle;
+            }
+          }
+          ctx.rotate(rad);
           ctx.fillStyle = isSel ? '#ffffff' : entity.type === 'kinematic' ? '#ffd600' : '#00bcd4';
           ctx.fillRect(-w / 2, -h / 2, w, h);
           break;

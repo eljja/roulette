@@ -56,11 +56,12 @@ export class MapEditorUI {
           </div>
           <div class="canvas-hints">
             <span>🗺️ 미니맵: 클릭/드래그 이동</span>
-            <span>🖱️ 좌클릭: 선택/이동</span>
+            <span>🖱️ 좌클릭: 선택/이동 (Shift: 축고정, Ctrl: 복제이동)</span>
             <span>🖐️ 우클릭: 화면 이동</span>
             <span>🔍 휠: 줌</span>
-            <span>⌨️ Del: 삭제</span>
-            <span>Ctrl+D: 복제</span>
+            <span>⌨️ Ctrl+Z/Y: 실행취소/다시실행</span>
+            <span>📋 Ctrl+C/V: 복사/붙여넣기</span>
+            <span>🗑️ Del: 삭제</span>
           </div>
           <div id="testModeBanner" class="test-mode-banner hide">
             <span>▶️ [테스트 플레이 진행 중]</span>
@@ -87,6 +88,10 @@ export class MapEditorUI {
             </button>
           </div>
           <div class="sidebar-actions secondary">
+            <button id="btnUndo" class="btn-sub" title="실행 취소 (Ctrl+Z)">↩️ 실행 취소</button>
+            <button id="btnRedo" class="btn-sub" title="다시 실행 (Ctrl+Y)">↪️ 다시 실행</button>
+          </div>
+          <div class="sidebar-actions tertiary">
             <button id="btnSaveJson" class="btn-sub">💾 JSON 다운로드</button>
             <label class="btn-sub file-label">
               📂 JSON 불러오기
@@ -298,6 +303,14 @@ export class MapEditorUI {
     this.testPlayBtn.addEventListener('click', toggleTestPlay);
     this.container.querySelector('#btnStopTestBanner')?.addEventListener('click', toggleTestPlay);
 
+    // 실행 취소 / 다시 실행
+    this.container.querySelector('#btnUndo')?.addEventListener('click', () => {
+      this.editor.undo();
+    });
+    this.container.querySelector('#btnRedo')?.addEventListener('click', () => {
+      this.editor.redo();
+    });
+
     // 🔗 링크 복사 (URL Hash)
     this.container.querySelector('#btnShareLink')?.addEventListener('click', () => {
       saveCustomMapToLocal(this.editor.stage);
@@ -356,6 +369,10 @@ export class MapEditorUI {
       this.goalYInput.value = stage.goalY.toString();
       this.goalYSlider.value = stage.goalY.toString();
       this.updateSpawnInputs();
+    };
+
+    this.editor.onToast = (msg) => {
+      this.showToast(msg);
     };
   }
 
