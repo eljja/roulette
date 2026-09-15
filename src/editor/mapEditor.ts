@@ -96,6 +96,11 @@ export class MapEditor {
   private testAnimFrame = 0;
   private testLastTime = 0;
 
+  // 키보드 화면 이동 상태
+  private keysDown = new Set<string>();
+  private keyHoldDuration = 0;
+  private lastKeyTime = 0;
+
   private isRunning = false;
 
   constructor(canvas: HTMLCanvasElement, initialStage?: StageDef) {
@@ -390,7 +395,7 @@ export class MapEditor {
     window.addEventListener('resize', () => this.resize());
     setTimeout(() => this.resize(), 50);
 
-    // 휠 줌
+    // 휠 스크롤 및 줌
     this.canvas.addEventListener(
       'wheel',
       (e: WheelEvent) => {
@@ -401,29 +406,61 @@ export class MapEditor {
           x: (e.clientX - rect.left) * dpr,
           y: (e.clientY - rect.top) * dpr,
         };
-        const mouseWorldBefore = this.screenToWorld(mouseScreen.x, mouseScreen.y);
 
-        const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
-        this.zoom = Math.max(6, Math.min(80, this.zoom * zoomFactor));
+        if (e.ctrlKey || e.metaKey) {
+          // Ctrl + 휠: 마우스 커서 중심 확대/축소 (Zoom)
+          const mouseWorldBefore = this.screenToWorld(mouseScreen.x, mouseScreen.y);
+          const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+          this.zoom = Math.max(6, Math.min(80, this.zoom * zoomFactor));
 
-        const mouseWorldAfter = this.screenToWorld(mouseScreen.x, mouseScreen.y);
-        this.viewX -= mouseWorldAfter.x - mouseWorldBefore.x;
-        this.viewY -= mouseWorldAfter.y - mouseWorldBefore.y;
+          const mouseWorldAfter = this.screenToWorld(mouseScreen.x, mouseScreen.y);
+          this.viewX -= mouseWorldAfter.x - mouseWorldBefore.x;
+          this.viewY -= mouseWorldAfter.y - mouseWorldBefore.y;
+        } else if (e.shiftKey) {
+          // Shift + 휠: 좌우 수평 스크롤
+          const scrollSpeed = 1.0;
+          this.viewX += (e.deltaY / this.zoom) * scrollSpeed;
+        } else {
+          // 일반 휠: 상하 수직 스크롤 (및 트랙패드 수평 스크롤)
+          const scrollSpeed = 1.2;
+          this.viewY += (e.deltaY / this.zoom) * scrollSpeed;
+          if (e.deltaX) {
+            this.viewX += (e.deltaX / this.zoom) * scrollSpeed;
+          }
+        }
       },
       { passive: false }
     );
 
     // 마우스 다운
     this.canvas.addEventListener('mousedown', (e: MouseEvent) => {
-      if (this.isTesting) return;
-
       const rect = this.canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       const sx = (e.clientX - rect.left) * dpr;
       const sy = (e.clientY - rect.top) * dpr;
       const world = this.screenToWorld(sx, sy);
 
-      // 우클릭, 휠클릭, Space키 조합: 뷰 이동(Pan)
+      // 0. 미니맵 클릭 검사 (뷰포트 이동) - 테스트 플레이 중이든 편집 중이든 항상 최우선 처리!
+      const goalY = this.stage.goalY;
+      const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
+      const mmW = this.MINIMAP_UNITS * mmScale;
+      const mmH = Math.max(80, goalY * mmScale);
+      if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
+        this.isMinimapDragging = true;
+        this.viewX = Math.max(0, Math.min(26, (sx - this.MINIMAP_X) / mmScale));
+        this.viewY = Math.max(0, Math.min(goalY, (sy - this.MINIMAP_Y) / mmScale));
+        return;
+      }
+
+      // 테스트 플레이 중: 캔버스 어디를 클릭/드래그하든 화면 이동(Pan)으로 작동
+      if (this.isTesting) {
+        this.isPanning = true;
+        this.panStart = { x: sx, y: sy };
+        this.canvas.style.cursor = 'grab';
+        return;
+      }
+
+      // 편집 모드: 우클릭, 휠클릭, Space키, Shift/Alt 조합: 뷰 이동(Pan)
       if (e.button === 1 || e.button === 2 || e.shiftKey || e.altKey) {
         e.preventDefault();
         this.isPanning = true;
@@ -433,18 +470,6 @@ export class MapEditor {
       }
 
       if (e.button === 0) {
-        // 0. 미니맵 클릭 검사 (뷰포트 이동)
-        const goalY = this.stage.goalY;
-        const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
-        const mmW = this.MINIMAP_UNITS * mmScale;
-        const mmH = Math.max(80, goalY * mmScale);
-        if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
-          this.isMinimapDragging = true;
-          this.viewX = (sx - this.MINIMAP_X) / mmScale;
-          this.viewY = (sy - this.MINIMAP_Y) / mmScale;
-          return;
-        }
-
         // 1. 현재 선택된 엔티티의 기즈모 핸들 클릭 여부 최우선 검사
         if (this.selectedIndex !== null && this.stage.entities?.[this.selectedIndex]) {
           const selEntity = this.stage.entities[this.selectedIndex];
@@ -593,6 +618,10 @@ export class MapEditor {
         } else {
           this.activeHandle = null;
           this.onSelectionChange?.(null, null);
+          // 빈 영역 좌클릭 드래그 시에도 화면 이동(Pan) 지원
+          this.isPanning = true;
+          this.panStart = { x: sx, y: sy };
+          this.canvas.style.cursor = 'grab';
         }
       }
     });
@@ -620,8 +649,8 @@ export class MapEditor {
       if (this.isMinimapDragging) {
         const goalY = this.stage.goalY;
         const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
-        this.viewX = (sx - this.MINIMAP_X) / mmScale;
-        this.viewY = (sy - this.MINIMAP_Y) / mmScale;
+        this.viewX = Math.max(0, Math.min(26, (sx - this.MINIMAP_X) / mmScale));
+        this.viewY = Math.max(0, Math.min(goalY, (sy - this.MINIMAP_Y) / mmScale));
         return;
       }
 
@@ -632,6 +661,12 @@ export class MapEditor {
       const mmH = Math.max(80, goalY * mmScale);
       if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
         this.canvas.style.cursor = 'pointer';
+        return;
+      }
+
+      // 테스트 플레이 중 마우스 커서 피드백
+      if (this.isTesting) {
+        this.canvas.style.cursor = this.isPanning ? 'grabbing' : 'grab';
         return;
       }
 
@@ -1020,11 +1055,44 @@ export class MapEditor {
       }
     });
 
-    // 키보드 단축키
+    // 키보드 이벤트 (화면 내비게이션 및 단축키)
     window.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (this.isTesting) return;
       const tag = (document.activeElement as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      // 1. 방향키 카메라 이동 (테스트 플레이 중이든 편집 중이든 항상 작동)
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        this.keysDown.add(e.key);
+        return;
+      }
+
+      // 2. PageUp / PageDown / Home / End 빠른 화면 이동
+      if (e.key === 'PageDown') {
+        e.preventDefault();
+        const pageSize = (this.canvas.height / this.zoom) * 0.75;
+        this.viewY = Math.min(this.stage.goalY + 15, this.viewY + pageSize);
+        return;
+      }
+      if (e.key === 'PageUp') {
+        e.preventDefault();
+        const pageSize = (this.canvas.height / this.zoom) * 0.75;
+        this.viewY = Math.max(-10, this.viewY - pageSize);
+        return;
+      }
+      if (e.key === 'Home') {
+        e.preventDefault();
+        this.viewY = this.getSpawnArea().y + 5;
+        return;
+      }
+      if (e.key === 'End') {
+        e.preventDefault();
+        this.viewY = this.stage.goalY;
+        return;
+      }
+
+      // 테스트 플레이 중에는 편집 단축키 비활성화
+      if (this.isTesting) return;
 
       const isCtrlOrMeta = e.ctrlKey || e.metaKey;
 
@@ -1072,6 +1140,17 @@ export class MapEditor {
         this.duplicateSelectedEntity();
         return;
       }
+    });
+
+    window.addEventListener('keyup', (e: KeyboardEvent) => {
+      if (this.keysDown.has(e.key)) {
+        this.keysDown.delete(e.key);
+      }
+    });
+
+    window.addEventListener('blur', () => {
+      this.keysDown.clear();
+      this.keyHoldDuration = 0;
     });
   }
 
@@ -1190,6 +1269,9 @@ export class MapEditor {
   public stopTestPlay() {
     this.isTesting = false;
     this.isPhysicsReady = false;
+    this.isPanning = false;
+    this.isMinimapDragging = false;
+    this.canvas.style.cursor = '';
     if (this.testPhysics) {
       this.testPhysics.clearMarbles();
       this.testPhysics.clear();
@@ -1203,6 +1285,24 @@ export class MapEditor {
     this.isRunning = true;
     const render = (time: number) => {
       if (!this.isRunning) return;
+
+      // 키보드 방향키 카메라 이동 (부드러운 적응형 가속 스크롤)
+      if (this.keysDown.size > 0) {
+        if (!this.lastKeyTime) this.lastKeyTime = time;
+        const dt = Math.min(time - this.lastKeyTime, 50);
+        this.keyHoldDuration += dt;
+        const accelFactor = Math.min(3.5, 1 + this.keyHoldDuration / 400);
+        const baseSpeed = (20 / Math.max(10, this.zoom)) * (dt / 1000) * 16;
+        const moveDist = baseSpeed * accelFactor;
+
+        if (this.keysDown.has('ArrowLeft')) this.viewX -= moveDist;
+        if (this.keysDown.has('ArrowRight')) this.viewX += moveDist;
+        if (this.keysDown.has('ArrowUp')) this.viewY -= moveDist;
+        if (this.keysDown.has('ArrowDown')) this.viewY += moveDist;
+      } else {
+        this.keyHoldDuration = 0;
+      }
+      this.lastKeyTime = time;
 
       if (this.isTesting && this.isPhysicsReady && this.testPhysics) {
         if (!this.testLastTime) this.testLastTime = time;
@@ -1228,6 +1328,7 @@ export class MapEditor {
   public destroy() {
     this.isRunning = false;
     cancelAnimationFrame(this.testAnimFrame);
+    this.keysDown.clear();
     this.stopTestPlay();
   }
 

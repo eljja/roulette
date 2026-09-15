@@ -56,12 +56,11 @@ export class MapEditorUI {
           </div>
           <div class="canvas-hints">
             <span>🗺️ 미니맵: 클릭/드래그 이동</span>
-            <span>🖱️ 좌클릭: 선택/이동 (Shift: 축고정, Ctrl: 복제이동)</span>
-            <span>🖐️ 우클릭: 화면 이동</span>
-            <span>🔍 휠: 줌</span>
+            <span>🖱️ 휠: 상하 스크롤 (Ctrl+휠: 줌)</span>
+            <span>🖐️ 드래그: 화면 이동</span>
+            <span>⌨️ 방향키/PgUp/Dn: 화면 스크롤</span>
             <span>⌨️ Ctrl+Z/Y: 실행취소/다시실행</span>
             <span>📋 Ctrl+C/V: 복사/붙여넣기</span>
-            <span>🗑️ Del: 삭제</span>
           </div>
           <div id="testModeBanner" class="test-mode-banner hide">
             <span>▶️ [테스트 플레이 진행 중]</span>
