@@ -328,6 +328,13 @@ export class MapEditorUI {
             <option value="kinematic" ${isKinematic ? 'selected' : ''}>회전 (Kinematic)</option>
           </select>
         </div>
+        <div class="inspector-hint">
+          ${
+            isKinematic
+              ? '💡 캔버스에서 좌우/상하 핸들을 드래그하면 <strong>중심축이 고정된 채 대칭</strong>으로 크기가 조절됩니다.'
+              : '💡 캔버스에서 4방향 핸들을 드래그하여 각 방향으로 크기를 조절할 수 있습니다.'
+          }
+        </div>
       `;
     } else if (isCircle) {
       const circle = shape as EntityCircleShape;
@@ -335,6 +342,27 @@ export class MapEditorUI {
         <div class="form-row">
           <label>반지름 (Radius)</label>
           <input type="number" id="inRadius" min="0.1" step="0.05" value="${circle.radius.toFixed(2)}" />
+        </div>
+        <div class="inspector-hint">
+          💡 캔버스에서 <strong>외곽선 둘레를 드래그</strong>하면 중심이 고정된 채 반지름이 조절됩니다.
+        </div>
+      `;
+    } else if (shape.type === 'polyline') {
+      const poly = shape as EntityPolylineShape;
+      html += `
+        <div class="form-row">
+          <label>정점(Point) 개수</label>
+          <div style="font-weight: bold; color: #00e5ff; padding: 4px 0;">${poly.points.length}개</div>
+        </div>
+        <div class="form-row">
+          <div class="dual-inputs">
+            <button type="button" id="btnAddPolyPoint" class="btn-sub" style="flex:1;">+ 끝에 정점 추가</button>
+            <button type="button" id="btnRemovePolyPoint" class="btn-sub" style="flex:1;" ${poly.points.length <= 2 ? 'disabled' : ''}>- 마지막 정점 삭제</button>
+          </div>
+        </div>
+        <div class="inspector-hint">
+          💡 캔버스에서 <strong>각 번호가 적힌 원형 정점</strong>을 직접 마우스로 드래그하여 벽의 위치와 모양을 자유롭게 바꿀 수 있습니다.<br>
+          (선 위 더블클릭: 새 정점 삽입 / 정점 더블클릭: 삭제)
         </div>
       `;
     }
@@ -397,6 +425,29 @@ export class MapEditorUI {
       const circle = shape as EntityCircleShape;
       this.inspectorPanel.querySelector('#inRadius')?.addEventListener('change', (e: any) => {
         circle.radius = Math.max(0.05, parseFloat(e.target.value) || 0.25);
+      });
+    } else if (shape.type === 'polyline') {
+      const poly = shape as EntityPolylineShape;
+      this.inspectorPanel.querySelector('#btnAddPolyPoint')?.addEventListener('click', () => {
+        const len = poly.points.length;
+        if (len >= 2) {
+          const pPrev = poly.points[len - 2];
+          const pLast = poly.points[len - 1];
+          const dx = pLast[0] - pPrev[0];
+          const dy = pLast[1] - pPrev[1];
+          poly.points.push([pLast[0] + (dx || 0), pLast[1] + (dy || 2)]);
+        } else {
+          poly.points.push([0, 2]);
+        }
+        this.updateInspector(entity, index);
+        this.editor.onStageChange?.(this.editor.stage);
+      });
+      this.inspectorPanel.querySelector('#btnRemovePolyPoint')?.addEventListener('click', () => {
+        if (poly.points.length > 2) {
+          poly.points.pop();
+          this.updateInspector(entity, index);
+          this.editor.onStageChange?.(this.editor.stage);
+        }
       });
     }
 

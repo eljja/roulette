@@ -1,6 +1,12 @@
 import type { StageDef } from '../data/maps';
 import { Box2dPhysics } from '../physics-box2d';
-import type { EntityShape, MapEntity } from '../types/MapEntity.type';
+import type {
+  EntityBoxShape,
+  EntityCircleShape,
+  EntityPolylineShape,
+  EntityShape,
+  MapEntity,
+} from '../types/MapEntity.type';
 import type { VectorLike } from '../types/VectorLike';
 
 export interface DragTemplateData {
@@ -14,6 +20,29 @@ export interface DragTemplateData {
     angularVelocity: number;
     life?: number;
   };
+}
+
+export type HandleType =
+  | 'none'
+  | 'body'
+  | 'goal'
+  | 'vertex'
+  | 'circle-radius'
+  | 'box-left'
+  | 'box-right'
+  | 'box-top'
+  | 'box-bottom'
+  | 'box-rotate';
+
+interface ActiveHandleState {
+  type: HandleType;
+  vertexIndex?: number;
+  startWorld: VectorLike;
+  entityStartPos: VectorLike;
+  boxStartW: number;
+  boxStartH: number;
+  boxStartRot: number;
+  circleStartR: number;
 }
 
 export class MapEditor {
@@ -32,10 +61,9 @@ export class MapEditor {
 
   // 마우스 상태
   private isPanning = false;
-  private isDraggingEntity = false;
-  private isDraggingGoal = false;
   private panStart = { x: 0, y: 0 };
-  private entityDragOffset = { x: 0, y: 0 };
+  private activeHandle: ActiveHandleState | null = null;
+  private hoveredHandle: { type: HandleType; vertexIndex?: number } | null = null;
 
   // 테스트 플레이 상태
   public isTesting = false;
@@ -116,6 +144,8 @@ export class MapEditor {
   public setStage(newStage: StageDef) {
     this.stage = JSON.parse(JSON.stringify(newStage));
     this.selectedIndex = null;
+    this.activeHandle = null;
+    this.hoveredHandle = null;
     this.viewY = Math.min(this.stage.goalY / 2, 40);
     this.onSelectionChange?.(null, null);
     this.onStageChange?.(this.stage);
@@ -140,8 +170,110 @@ export class MapEditor {
     };
   }
 
+  // ================= 기즈모 핸들 히트테스트 =================
+  private hitTestHandle(
+    entity: MapEntity,
+    wx: number,
+    wy: number,
+    sx: number,
+    sy: number
+  ): { type: HandleType; vertexIndex?: number } | null {
+    const shape = entity.shape;
+    const tolPx = 10;
+    const tolWorld = tolPx / this.zoom;
+
+    // 1. Polyline: 각 정점(Vertex) 핸들 검사
+    if (shape.type === 'polyline') {
+      const poly = shape as EntityPolylineShape;
+      for (let i = 0; i < poly.points.length; i++) {
+        const p = poly.points[i];
+        const ptW = { x: entity.position.x + p[0], y: entity.position.y + p[1] };
+        const ptS = this.worldToScreen(ptW.x, ptW.y);
+        if (Math.hypot(sx - ptS.x, sy - ptS.y) <= tolPx + 2) {
+          return { type: 'vertex', vertexIndex: i };
+        }
+      }
+      return null;
+    }
+
+    // 2. Circle: 외곽선 둘레(Circumference) 드래그 핸들 검사
+    if (shape.type === 'circle') {
+      const circle = shape as EntityCircleShape;
+      const cenS = this.worldToScreen(entity.position.x, entity.position.y);
+      const rS = circle.radius * this.zoom;
+      const distFromCenterS = Math.hypot(sx - cenS.x, sy - cenS.y);
+
+      // 외곽선 반지름 오차 8px 이내
+      if (Math.abs(distFromCenterS - rS) <= tolPx) {
+        return { type: 'circle-radius' };
+      }
+      return null;
+    }
+
+    // 3. Box: 4방향 에지 핸들 및 회전 핸들 검사
+    if (shape.type === 'box') {
+      const box = shape as EntityBoxShape;
+      const cx = entity.position.x;
+      const cy = entity.position.y;
+      const rad = (box.rotation * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+
+      // 마우스 좌표를 상자 로컬 좌표계로 회전 변환
+      const dx = wx - cx;
+      const dy = wy - cy;
+      const lx = dx * cos + dy * sin;
+      const ly = -dx * sin + dy * cos;
+
+      const w = box.width;
+      const h = box.height;
+
+      // 회전 핸들: 상단 중앙에서 위쪽으로 0.8m 떨어진 위치
+      const rotHandleOffset = h + Math.max(0.8, 16 / this.zoom);
+      const rotW = {
+        x: cx - rotHandleOffset * Math.sin(rad),
+        y: cy - rotHandleOffset * Math.cos(rad),
+      };
+      const rotS = this.worldToScreen(rotW.x, rotW.y);
+      if (Math.hypot(sx - rotS.x, sy - rotS.y) <= tolPx) {
+        return { type: 'box-rotate' };
+      }
+
+      // 우측 에지 (Right)
+      if (Math.abs(lx - w) <= tolWorld && Math.abs(ly) <= h + tolWorld) {
+        return { type: 'box-right' };
+      }
+      // 좌측 에지 (Left)
+      if (Math.abs(lx - -w) <= tolWorld && Math.abs(ly) <= h + tolWorld) {
+        return { type: 'box-left' };
+      }
+      // 하단 에지 (Bottom)
+      if (Math.abs(ly - h) <= tolWorld && Math.abs(lx) <= w + tolWorld) {
+        return { type: 'box-bottom' };
+      }
+      // 상단 에지 (Top)
+      if (Math.abs(ly - -h) <= tolWorld && Math.abs(lx) <= w + tolWorld) {
+        return { type: 'box-top' };
+      }
+    }
+
+    return null;
+  }
+
+  // 박스 회전 각도에 따른 마우스 리사이즈 커서 결정
+  private getBoxResizeCursor(boxRotation: number, edge: 'left' | 'right' | 'top' | 'bottom'): string {
+    let angle = boxRotation;
+    if (edge === 'top' || edge === 'bottom') {
+      angle += 90;
+    }
+    const normAngle = ((angle % 180) + 180) % 180;
+    if (normAngle >= 22.5 && normAngle < 67.5) return 'nwse-resize';
+    if (normAngle >= 67.5 && normAngle < 112.5) return 'ns-resize';
+    if (normAngle >= 112.5 && normAngle < 157.5) return 'nesw-resize';
+    return 'ew-resize';
+  }
+
   private bindEvents() {
-    // 캔버스 크기 동기화
     window.addEventListener('resize', () => this.resize());
     setTimeout(() => this.resize(), 50);
 
@@ -161,7 +293,6 @@ export class MapEditor {
         const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
         this.zoom = Math.max(6, Math.min(80, this.zoom * zoomFactor));
 
-        // 마우스 커서 위치를 중심으로 확대/축소
         const mouseWorldAfter = this.screenToWorld(mouseScreen.x, mouseScreen.y);
         this.viewX -= mouseWorldAfter.x - mouseWorldBefore.x;
         this.viewY -= mouseWorldAfter.y - mouseWorldBefore.y;
@@ -179,7 +310,7 @@ export class MapEditor {
       const sy = (e.clientY - rect.top) * dpr;
       const world = this.screenToWorld(sx, sy);
 
-      // 우클릭, 휠클릭 또는 Space키 조합: 뷰 이동(Pan)
+      // 우클릭, 휠클릭, Space키 조합: 뷰 이동(Pan)
       if (e.button === 1 || e.button === 2 || e.shiftKey || e.altKey) {
         e.preventDefault();
         this.isPanning = true;
@@ -189,14 +320,45 @@ export class MapEditor {
       }
 
       if (e.button === 0) {
-        // 골 라인 조작 체크
+        // 1. 현재 선택된 엔티티의 기즈모 핸들 클릭 여부 최우선 검사
+        if (this.selectedIndex !== null && this.stage.entities?.[this.selectedIndex]) {
+          const selEntity = this.stage.entities[this.selectedIndex];
+          const handle = this.hitTestHandle(selEntity, world.x, world.y, sx, sy);
+
+          if (handle) {
+            const bShape = selEntity.shape.type === 'box' ? (selEntity.shape as EntityBoxShape) : null;
+            const cShape = selEntity.shape.type === 'circle' ? (selEntity.shape as EntityCircleShape) : null;
+
+            this.activeHandle = {
+              type: handle.type,
+              vertexIndex: handle.vertexIndex,
+              startWorld: { x: world.x, y: world.y },
+              entityStartPos: { x: selEntity.position.x, y: selEntity.position.y },
+              boxStartW: bShape?.width ?? 0,
+              boxStartH: bShape?.height ?? 0,
+              boxStartRot: bShape?.rotation ?? 0,
+              circleStartR: cShape?.radius ?? 0,
+            };
+            return;
+          }
+        }
+
+        // 2. 골 라인 조작 체크
         if (Math.abs(world.y - this.stage.goalY) < 1.0) {
-          this.isDraggingGoal = true;
+          this.activeHandle = {
+            type: 'goal',
+            startWorld: { x: world.x, y: world.y },
+            entityStartPos: { x: 0, y: 0 },
+            boxStartW: 0,
+            boxStartH: 0,
+            boxStartRot: 0,
+            circleStartR: 0,
+          };
           this.canvas.style.cursor = 'ns-resize';
           return;
         }
 
-        // 엔티티 클릭 선택 체크 (역순: 위에 그려진 것 먼저)
+        // 3. 엔티티 클릭 선택 체크 (위에 그려진 것 먼저)
         const entities = this.stage.entities || [];
         let hitIndex: number | null = null;
 
@@ -210,13 +372,21 @@ export class MapEditor {
         this.selectedIndex = hitIndex;
         if (hitIndex !== null) {
           const ent = entities[hitIndex];
-          this.isDraggingEntity = true;
-          this.entityDragOffset = {
-            x: ent.position.x - world.x,
-            y: ent.position.y - world.y,
+          const bShape = ent.shape.type === 'box' ? (ent.shape as EntityBoxShape) : null;
+          const cShape = ent.shape.type === 'circle' ? (ent.shape as EntityCircleShape) : null;
+
+          this.activeHandle = {
+            type: 'body',
+            startWorld: { x: world.x, y: world.y },
+            entityStartPos: { x: ent.position.x, y: ent.position.y },
+            boxStartW: bShape?.width ?? 0,
+            boxStartH: bShape?.height ?? 0,
+            boxStartRot: bShape?.rotation ?? 0,
+            circleStartR: cShape?.radius ?? 0,
           };
           this.onSelectionChange?.(ent, hitIndex);
         } else {
+          this.activeHandle = null;
           this.onSelectionChange?.(null, null);
         }
       }
@@ -230,6 +400,7 @@ export class MapEditor {
       const sy = (e.clientY - rect.top) * dpr;
       const world = this.screenToWorld(sx, sy);
 
+      // 뷰 이동(Pan) 중
       if (this.isPanning) {
         const dx = (sx - this.panStart.x) / this.zoom;
         const dy = (sy - this.panStart.y) / this.zoom;
@@ -239,7 +410,61 @@ export class MapEditor {
         return;
       }
 
-      if (this.isDraggingGoal) {
+      // 아무것도 드래그하지 않을 때 커서 모양 피드백
+      if (!this.activeHandle) {
+        let newCursor = '';
+
+        if (this.selectedIndex !== null && this.stage.entities?.[this.selectedIndex]) {
+          const selEntity = this.stage.entities[this.selectedIndex];
+          const handle = this.hitTestHandle(selEntity, world.x, world.y, sx, sy);
+          this.hoveredHandle = handle;
+
+          if (handle) {
+            switch (handle.type) {
+              case 'vertex':
+                newCursor = 'crosshair';
+                break;
+              case 'circle-radius':
+                newCursor = 'nwse-resize';
+                break;
+              case 'box-rotate':
+                newCursor = 'grab';
+                break;
+              case 'box-left':
+              case 'box-right':
+              case 'box-top':
+              case 'box-bottom': {
+                const rot = (selEntity.shape as EntityBoxShape).rotation || 0;
+                const edge = handle.type.replace('box-', '') as 'left' | 'right' | 'top' | 'bottom';
+                newCursor = this.getBoxResizeCursor(rot, edge);
+                break;
+              }
+            }
+          }
+        }
+
+        if (!newCursor) {
+          if (Math.abs(world.y - this.stage.goalY) < 1.0) {
+            newCursor = 'ns-resize';
+          } else {
+            const entities = this.stage.entities || [];
+            for (let i = entities.length - 1; i >= 0; i--) {
+              if (this.hitTest(entities[i], world.x, world.y)) {
+                newCursor = 'move';
+                break;
+              }
+            }
+          }
+        }
+
+        this.canvas.style.cursor = newCursor;
+        return;
+      }
+
+      // 기즈모 조작 처리
+      const handle = this.activeHandle;
+
+      if (handle.type === 'goal') {
         const newGoalY = Math.max(20, Math.round(world.y * 2) / 2);
         this.stage.goalY = newGoalY;
         this.stage.zoomY = Math.max(15, newGoalY - 5);
@@ -247,29 +472,188 @@ export class MapEditor {
         return;
       }
 
-      if (this.isDraggingEntity && this.selectedIndex !== null && this.stage.entities) {
-        const ent = this.stage.entities[this.selectedIndex];
-        if (ent) {
-          // 0.25 단위 격자 스냅
-          let nx = world.x + this.entityDragOffset.x;
-          let ny = world.y + this.entityDragOffset.y;
-          nx = Math.round(nx * 4) / 4;
-          ny = Math.round(ny * 4) / 4;
+      if (this.selectedIndex === null || !this.stage.entities?.[this.selectedIndex]) return;
+      const entity = this.stage.entities[this.selectedIndex];
+      const shape = entity.shape;
 
-          ent.position.x = nx;
-          ent.position.y = ny;
-          this.onSelectionChange?.(ent, this.selectedIndex);
+      // 1. Polyline 정점(Point) 드래그 위치 변경
+      if (handle.type === 'vertex' && handle.vertexIndex !== undefined && shape.type === 'polyline') {
+        const poly = shape as EntityPolylineShape;
+        if (poly.points[handle.vertexIndex]) {
+          // 0.25 단위 좌표 스냅
+          const snapWx = Math.round(world.x * 4) / 4;
+          const snapWy = Math.round(world.y * 4) / 4;
+          poly.points[handle.vertexIndex][0] = snapWx - entity.position.x;
+          poly.points[handle.vertexIndex][1] = snapWy - entity.position.y;
+          this.onSelectionChange?.(entity, this.selectedIndex);
           this.onStageChange?.(this.stage);
         }
+        return;
+      }
+
+      // 2. Circle 외곽선 드래그 (중심 고정 반지름 변경)
+      if (handle.type === 'circle-radius' && shape.type === 'circle') {
+        const circle = shape as EntityCircleShape;
+        const dist = Math.hypot(world.x - entity.position.x, world.y - entity.position.y);
+        // 0.05 단위 반지름 스냅 (최소 0.1m)
+        circle.radius = Math.max(0.1, Math.round(dist * 20) / 20);
+        this.onSelectionChange?.(entity, this.selectedIndex);
+        this.onStageChange?.(this.stage);
+        return;
+      }
+
+      // 3. Box 크기 조절 (회전 막대는 중심 고정 대칭 조절, 고정핀/안내벽은 4방향 조절)
+      if (
+        (handle.type === 'box-left' ||
+          handle.type === 'box-right' ||
+          handle.type === 'box-top' ||
+          handle.type === 'box-bottom') &&
+        shape.type === 'box'
+      ) {
+        const box = shape as EntityBoxShape;
+        const isKinematic = entity.type === 'kinematic'; // 회전 막대
+        const rad = (box.rotation * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+
+        // 마우스 월드 위치를 상자 시작 중심 기준 로컬 좌표로 변환
+        const dx = world.x - handle.entityStartPos.x;
+        const dy = world.y - handle.entityStartPos.y;
+        const lx = dx * cos + dy * sin;
+        const ly = -dx * sin + dy * cos;
+
+        if (isKinematic) {
+          // 회전 막대: 중심 엄격 고정, 좌우/상하 대칭 크기 조절
+          if (handle.type === 'box-left' || handle.type === 'box-right') {
+            box.width = Math.max(0.1, Math.round(Math.abs(lx) * 20) / 20);
+          } else {
+            box.height = Math.max(0.025, Math.round(Math.abs(ly) * 40) / 40);
+          }
+        } else {
+          // 고정 핀 / 안내 벽: 4방향 각각 조절 (반대쪽 에지는 고정 유지)
+          if (handle.type === 'box-right') {
+            const w0 = handle.boxStartW;
+            const newHalfW = Math.max(0.05, (lx - -w0) / 2);
+            const deltaCenter = (lx - w0) / 2;
+            entity.position.x = handle.entityStartPos.x + deltaCenter * cos;
+            entity.position.y = handle.entityStartPos.y + deltaCenter * sin;
+            box.width = Math.round(newHalfW * 20) / 20;
+          } else if (handle.type === 'box-left') {
+            const w0 = handle.boxStartW;
+            const newHalfW = Math.max(0.05, (w0 - lx) / 2);
+            const deltaCenter = (lx - -w0) / 2;
+            entity.position.x = handle.entityStartPos.x + deltaCenter * cos;
+            entity.position.y = handle.entityStartPos.y + deltaCenter * sin;
+            box.width = Math.round(newHalfW * 20) / 20;
+          } else if (handle.type === 'box-bottom') {
+            const h0 = handle.boxStartH;
+            const newHalfH = Math.max(0.025, (ly - -h0) / 2);
+            const deltaCenter = (ly - h0) / 2;
+            entity.position.x = handle.entityStartPos.x - deltaCenter * sin;
+            entity.position.y = handle.entityStartPos.y + deltaCenter * cos;
+            box.height = Math.round(newHalfH * 40) / 40;
+          } else if (handle.type === 'box-top') {
+            const h0 = handle.boxStartH;
+            const newHalfH = Math.max(0.025, (h0 - ly) / 2);
+            const deltaCenter = (ly - -h0) / 2;
+            entity.position.x = handle.entityStartPos.x - deltaCenter * sin;
+            entity.position.y = handle.entityStartPos.y + deltaCenter * cos;
+            box.height = Math.round(newHalfH * 40) / 40;
+          }
+        }
+
+        this.onSelectionChange?.(entity, this.selectedIndex);
+        this.onStageChange?.(this.stage);
+        return;
+      }
+
+      // 4. Box 회전 핸들 드래그
+      if (handle.type === 'box-rotate' && shape.type === 'box') {
+        const box = shape as EntityBoxShape;
+        const dx = world.x - entity.position.x;
+        const dy = world.y - entity.position.y;
+        const rotRad = Math.atan2(dy, dx) + Math.PI / 2;
+        let rotDeg = (rotRad * 180) / Math.PI;
+        rotDeg = ((rotDeg % 360) + 360) % 360;
+
+        // Shift 키가 안 눌려 있으면 5도 단위 스냅
+        if (!e.shiftKey) {
+          rotDeg = Math.round(rotDeg / 5) * 5;
+        }
+
+        box.rotation = rotDeg;
+        this.onSelectionChange?.(entity, this.selectedIndex);
+        this.onStageChange?.(this.stage);
+        return;
+      }
+
+      // 5. 전체 엔티티 이동 (Body Drag)
+      if (handle.type === 'body') {
+        const dx = world.x - handle.startWorld.x;
+        const dy = world.y - handle.startWorld.y;
+        let nx = handle.entityStartPos.x + dx;
+        let ny = handle.entityStartPos.y + dy;
+        nx = Math.round(nx * 4) / 4;
+        ny = Math.round(ny * 4) / 4;
+
+        entity.position.x = nx;
+        entity.position.y = ny;
+        this.onSelectionChange?.(entity, this.selectedIndex);
+        this.onStageChange?.(this.stage);
       }
     });
 
     // 마우스 업
     window.addEventListener('mouseup', () => {
       this.isPanning = false;
-      this.isDraggingEntity = false;
-      this.isDraggingGoal = false;
+      this.activeHandle = null;
       this.canvas.style.cursor = '';
+    });
+
+    // 더블 클릭: Polyline 정점 추가 및 삭제
+    this.canvas.addEventListener('dblclick', (e: MouseEvent) => {
+      if (this.selectedIndex === null || !this.stage.entities?.[this.selectedIndex]) return;
+      const entity = this.stage.entities[this.selectedIndex];
+      if (entity.shape.type !== 'polyline') return;
+
+      const rect = this.canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const sx = (e.clientX - rect.left) * dpr;
+      const sy = (e.clientY - rect.top) * dpr;
+      const world = this.screenToWorld(sx, sy);
+      const poly = entity.shape as EntityPolylineShape;
+
+      // 1. 기존 정점 위에서 더블클릭 시: 해당 정점 삭제 (최소 2개 유지)
+      for (let i = 0; i < poly.points.length; i++) {
+        const p = poly.points[i];
+        const ptS = this.worldToScreen(entity.position.x + p[0], entity.position.y + p[1]);
+        if (Math.hypot(sx - ptS.x, sy - ptS.y) <= 12) {
+          if (poly.points.length > 2) {
+            poly.points.splice(i, 1);
+            this.onSelectionChange?.(entity, this.selectedIndex);
+            this.onStageChange?.(this.stage);
+          }
+          return;
+        }
+      }
+
+      // 2. 선분 위에서 더블클릭 시: 해당 위치에 새 정점 삽입
+      for (let i = 0; i < poly.points.length - 1; i++) {
+        const p1 = poly.points[i];
+        const p2 = poly.points[i + 1];
+        const w1 = { x: entity.position.x + p1[0], y: entity.position.y + p1[1] };
+        const w2 = { x: entity.position.x + p2[0], y: entity.position.y + p2[1] };
+
+        const distToSegment = this.distancePointToSegment(world, w1, w2);
+        if (distToSegment <= 0.8) {
+          const snapWx = Math.round(world.x * 4) / 4;
+          const snapWy = Math.round(world.y * 4) / 4;
+          poly.points.splice(i + 1, 0, [snapWx - entity.position.x, snapWy - entity.position.y]);
+          this.onSelectionChange?.(entity, this.selectedIndex);
+          this.onStageChange?.(this.stage);
+          return;
+        }
+      }
     });
 
     // 컨텍스트 메뉴 방지
@@ -296,7 +680,6 @@ export class MapEditor {
         const sy = (e.clientY - rect.top) * dpr;
         const world = this.screenToWorld(sx, sy);
 
-        // 0.5 단위 좌표 스냅
         const snapX = Math.round(world.x * 2) / 2;
         const snapY = Math.round(world.y * 2) / 2;
 
@@ -320,7 +703,7 @@ export class MapEditor {
       }
     });
 
-    // 키보드 단축키 (Delete, 복제 Ctrl+D 등)
+    // 키보드 단축키
     window.addEventListener('keydown', (e: KeyboardEvent) => {
       if (this.isTesting) return;
       const tag = (document.activeElement as HTMLElement)?.tagName;
@@ -336,10 +719,25 @@ export class MapEditor {
     });
   }
 
+  private distancePointToSegment(p: VectorLike, a: VectorLike, b: VectorLike): number {
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const apx = p.x - a.x;
+    const apy = p.y - a.y;
+    const lenSq = abx * abx + aby * aby;
+    if (lenSq === 0) return Math.hypot(apx, apy);
+    let t = (apx * abx + apy * aby) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const projX = a.x + t * abx;
+    const projY = a.y + t * aby;
+    return Math.hypot(p.x - projX, p.y - projY);
+  }
+
   public deleteSelectedEntity() {
     if (this.selectedIndex === null || !this.stage.entities) return;
     this.stage.entities.splice(this.selectedIndex, 1);
     this.selectedIndex = null;
+    this.activeHandle = null;
     this.onSelectionChange?.(null, null);
     this.onStageChange?.(this.stage);
   }
@@ -352,6 +750,7 @@ export class MapEditor {
     clone.position.y += 1;
     this.stage.entities.push(clone);
     this.selectedIndex = this.stage.entities.length - 1;
+    this.activeHandle = null;
     this.onSelectionChange?.(clone, this.selectedIndex);
     this.onStageChange?.(this.stage);
   }
@@ -368,12 +767,13 @@ export class MapEditor {
       const localX = dx * cos - dy * sin;
       const localY = dx * sin + dy * cos;
       return Math.abs(localX) <= Math.max(shape.width, 0.4) && Math.abs(localY) <= Math.max(shape.height, 0.4);
-    } else if (shape.type === 'circle') {
+    }
+    if (shape.type === 'circle') {
       const distSq = dx * dx + dy * dy;
       const r = Math.max(shape.radius, 0.4);
       return distSq <= r * r;
-    } else if (shape.type === 'polyline') {
-      // polyline 점들과의 근접 테스트
+    }
+    if (shape.type === 'polyline') {
       for (const p of shape.points) {
         const pdx = wx - (entity.position.x + p[0]);
         const pdy = wy - (entity.position.y + p[1]);
@@ -388,13 +788,13 @@ export class MapEditor {
     if (this.isTesting) return;
     this.isTesting = true;
     this.selectedIndex = null;
+    this.activeHandle = null;
     this.onSelectionChange?.(null, null);
 
     this.testPhysics = new Box2dPhysics();
     await this.testPhysics.init();
     this.testPhysics.createStage(this.stage);
 
-    // 테스트용 구슬 12개 생성 (스폰 영역: x 10~15, y 1~4)
     this.testMarbles = [];
     for (let i = 0; i < 12; i++) {
       const x = 11 + (i % 4) * 0.8;
@@ -450,23 +850,19 @@ export class MapEditor {
     const w = this.canvas.width;
     const h = this.canvas.height;
 
-    // 배경 클리어 (다크 테마)
     ctx.fillStyle = '#181a1b';
     ctx.fillRect(0, 0, w, h);
 
-    // 1. 그리드(Grid) 그리기
     this.drawGrid();
-
-    // 2. 출발 영역 (Spawn Zone)
     this.drawSpawnArea();
-
-    // 3. 골 라인 (Goal Line)
     this.drawGoalLine();
-
-    // 4. 엔티티들 렌더링
     this.drawEntities();
 
-    // 5. 테스트 플레이 구슬 렌더링
+    // 선택된 엔티티 기즈모 핸들 렌더링
+    if (!this.isTesting && this.selectedIndex !== null && this.stage.entities?.[this.selectedIndex]) {
+      this.drawGizmo(this.stage.entities[this.selectedIndex]);
+    }
+
     if (this.isTesting && this.testPhysics) {
       this.drawTestMarbles();
     }
@@ -551,7 +947,6 @@ export class MapEditor {
     const sy = this.worldToScreen(0, goalY).y;
 
     ctx.save();
-    // 체크무늬 골 라인
     const boxSize = 14;
     for (let x = 0; x < this.canvas.width; x += boxSize * 2) {
       ctx.fillStyle = 'rgba(255, 215, 0, 0.6)';
@@ -569,7 +964,6 @@ export class MapEditor {
     ctx.lineTo(this.canvas.width, sy + 4);
     ctx.stroke();
 
-    // 라벨
     ctx.fillStyle = '#ffd700';
     ctx.font = 'bold 13px sans-serif';
     ctx.fillText(`🏁 GOAL LINE (Y: ${goalY}) - 드래그하여 조절`, 12, sy - 10);
@@ -588,12 +982,6 @@ export class MapEditor {
       ctx.save();
       ctx.translate(sp.x, sp.y);
 
-      // 선택된 객체 하이라이트 효과
-      if (isSelected) {
-        ctx.shadowColor = '#00ffff';
-        ctx.shadowBlur = 12;
-      }
-
       switch (shape.type) {
         case 'box': {
           const w = shape.width * 2 * this.zoom;
@@ -601,7 +989,6 @@ export class MapEditor {
           const rad = (shape.rotation * Math.PI) / 180;
           ctx.rotate(rad);
 
-          // 회전 막대 (kinematic) vs 고정 네모 (static) 색상 구분
           const isKinematic = entity.type === 'kinematic';
           ctx.fillStyle = isKinematic ? '#226f92' : '#1b5e7d';
           ctx.strokeStyle = isSelected ? '#ffffff' : isKinematic ? '#4dd0e1' : '#00bcd4';
@@ -610,14 +997,13 @@ export class MapEditor {
           ctx.fillRect(-w / 2, -h / 2, w, h);
           ctx.strokeRect(-w / 2, -h / 2, w, h);
 
-          // 회전 막대 회전 방향 인디케이터
+          // 회전 막대 중심 피벗 핀
           if (isKinematic) {
             ctx.fillStyle = '#ffeb3b';
             ctx.beginPath();
-            ctx.arc(0, 0, 4, 0, Math.PI * 2);
+            ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
             ctx.fill();
 
-            // 회전 속도 표시
             const vel = entity.props.angularVelocity || 0;
             ctx.font = '10px sans-serif';
             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
@@ -638,7 +1024,6 @@ export class MapEditor {
           ctx.fill();
           ctx.stroke();
 
-          // 버블 내구도(life) 표시
           if (entity.props.life && entity.props.life > 0) {
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 11px sans-serif';
@@ -663,14 +1048,6 @@ export class MapEditor {
               ctx.lineTo(pt[0] * this.zoom, pt[1] * this.zoom);
             }
             ctx.stroke();
-
-            // 점마다 작은 마커 표시
-            for (const pt of shape.points) {
-              ctx.fillStyle = isSelected ? '#00ffff' : 'rgba(255, 255, 255, 0.6)';
-              ctx.beginPath();
-              ctx.arc(pt[0] * this.zoom, pt[1] * this.zoom, isSelected ? 4 : 2.5, 0, Math.PI * 2);
-              ctx.fill();
-            }
           }
           break;
         }
@@ -678,6 +1055,154 @@ export class MapEditor {
 
       ctx.restore();
     });
+  }
+
+  // ================= 기즈모(Gizmo) 상세 렌더링 =================
+  private drawGizmo(entity: MapEntity) {
+    const ctx = this.ctx;
+    const shape = entity.shape;
+    const sp = this.worldToScreen(entity.position.x, entity.position.y);
+
+    ctx.save();
+
+    // 1. Polyline: 각 정점에 드래그 가능한 컨트롤 포인트 핸들 표시
+    if (shape.type === 'polyline') {
+      const poly = shape as EntityPolylineShape;
+      poly.points.forEach((p, i) => {
+        const ptW = { x: entity.position.x + p[0], y: entity.position.y + p[1] };
+        const ptS = this.worldToScreen(ptW.x, ptW.y);
+        const isHovered = this.hoveredHandle?.type === 'vertex' && this.hoveredHandle.vertexIndex === i;
+        const isDragging = this.activeHandle?.type === 'vertex' && this.activeHandle.vertexIndex === i;
+
+        ctx.save();
+        ctx.beginPath();
+        const r = isHovered || isDragging ? 8 : 6;
+        ctx.arc(ptS.x, ptS.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = isDragging ? '#ffeb3b' : isHovered ? '#00ffff' : '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#00838f';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // 정점 번호 라벨 표시
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillText(`#${i + 1}`, ptS.x + 8, ptS.y - 8);
+        ctx.restore();
+      });
+    }
+
+    // 2. Circle: 외곽선 점선 링 + 4방향 둘레 리사이즈 핸들 (중심 고정 반지름 조절)
+    else if (shape.type === 'circle') {
+      const circle = shape as EntityCircleShape;
+      const rS = circle.radius * this.zoom;
+      const isRadiusHovered = this.hoveredHandle?.type === 'circle-radius';
+      const isRadiusDragging = this.activeHandle?.type === 'circle-radius';
+
+      ctx.save();
+      ctx.translate(sp.x, sp.y);
+
+      // 외곽선 강조 점선 링
+      ctx.beginPath();
+      ctx.arc(0, 0, rS, 0, Math.PI * 2);
+      ctx.strokeStyle = isRadiusHovered || isRadiusDragging ? '#00ffff' : 'rgba(0, 229, 255, 0.6)';
+      ctx.lineWidth = isRadiusHovered || isRadiusDragging ? 2.5 : 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+
+      // 둘레 4방향 핸들 (East, West, South, North)
+      const compassAngles = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
+      compassAngles.forEach((ang) => {
+        const hx = rS * Math.cos(ang);
+        const hy = rS * Math.sin(ang);
+        ctx.beginPath();
+        ctx.arc(hx, hy, 5, 0, Math.PI * 2);
+        ctx.fillStyle = isRadiusHovered || isRadiusDragging ? '#ffeb3b' : '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#00838f';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      });
+
+      // 중심 고정 안내 라벨
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#ffd54f';
+      ctx.textAlign = 'center';
+      ctx.fillText(`R: ${circle.radius.toFixed(2)}m (외곽선 드래그)`, 0, -rS - 10);
+      ctx.restore();
+    }
+
+    // 3. Box: 4방향 에지 핸들 + 회전 핸들 + 회전 막대 중심축 안내
+    else if (shape.type === 'box') {
+      const box = shape as EntityBoxShape;
+      const w = box.width * this.zoom; // 반너비
+      const h = box.height * this.zoom; // 반높이
+      const rad = (box.rotation * Math.PI) / 180;
+      const isKinematic = entity.type === 'kinematic';
+
+      ctx.save();
+      ctx.translate(sp.x, sp.y);
+      ctx.rotate(rad);
+
+      // 점선 선택 박스
+      ctx.strokeStyle = '#00e5ff';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(-w, -h, w * 2, h * 2);
+      ctx.setLineDash([]);
+
+      // 4방향 에지 핸들 그리기 헬퍼
+      const drawEdgeHandle = (hx: number, hy: number, hw: number, hh: number, type: HandleType) => {
+        const isHovered = this.hoveredHandle?.type === type;
+        const isDragging = this.activeHandle?.type === type;
+
+        ctx.fillStyle = isDragging ? '#ffeb3b' : isHovered ? '#00ffff' : '#ffffff';
+        ctx.fillRect(hx - hw / 2, hy - hh / 2, hw, hh);
+        ctx.strokeStyle = '#00838f';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(hx - hw / 2, hy - hh / 2, hw, hh);
+      };
+
+      // 우측 에지 핸들 (Right)
+      drawEdgeHandle(w, 0, 7, Math.min(18, h * 1.5), 'box-right');
+      // 좌측 에지 핸들 (Left)
+      drawEdgeHandle(-w, 0, 7, Math.min(18, h * 1.5), 'box-left');
+      // 하단 에지 핸들 (Bottom)
+      drawEdgeHandle(0, h, Math.min(18, w * 1.5), 7, 'box-bottom');
+      // 상단 에지 핸들 (Top)
+      drawEdgeHandle(0, -h, Math.min(18, w * 1.5), 7, 'box-top');
+
+      // 상단 회전 연결 줄 및 회전 핸들
+      const rotStemLen = Math.max(22, 0.8 * this.zoom);
+      ctx.beginPath();
+      ctx.moveTo(0, -h);
+      ctx.lineTo(0, -h - rotStemLen);
+      ctx.strokeStyle = 'rgba(0, 229, 255, 0.8)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      const isRotHovered = this.hoveredHandle?.type === 'box-rotate';
+      const isRotDragging = this.activeHandle?.type === 'box-rotate';
+      ctx.beginPath();
+      ctx.arc(0, -h - rotStemLen, isRotHovered || isRotDragging ? 7 : 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = isRotDragging ? '#ffeb3b' : isRotHovered ? '#00ffff' : '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#00838f';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // 중심 고정 안내 (회전 막대일 때)
+      if (isKinematic) {
+        ctx.fillStyle = '#ffeb3b';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('⤹⤸ 중심 고정 대칭 조절', 0, h + 15);
+      }
+
+      ctx.restore();
+    }
+
+    ctx.restore();
   }
 
   private drawTestMarbles() {
