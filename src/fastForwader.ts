@@ -3,12 +3,6 @@ import type { Rect } from './types/rect.type';
 import type { MouseEventArgs, UIObject } from './UIObject';
 
 export class FastForwader implements UIObject {
-  private bound: Rect = {
-    x: 0,
-    y: 0,
-    w: 0,
-    h: 0,
-  };
   private icon: HTMLImageElement;
 
   constructor() {
@@ -25,15 +19,9 @@ export class FastForwader implements UIObject {
   update(_deltaTime: number): void {}
 
   render(ctx: CanvasRenderingContext2D, _params: RenderParameters, width: number, height: number): void {
-    this.bound.w = width / 2;
-    this.bound.h = height / 2;
-    this.bound.x = this.bound.w / 2;
-    this.bound.y = this.bound.h / 2;
-
-    const centerX = this.bound.x + this.bound.w / 2;
-    const centerY = this.bound.y + this.bound.h / 2;
-
     if (this.isEnabled) {
+      const centerX = width / 2;
+      const centerY = height / 2;
       ctx.save();
       ctx.strokeStyle = 'white';
       ctx.globalAlpha = 0.5;
@@ -43,15 +31,17 @@ export class FastForwader implements UIObject {
   }
 
   getBoundingBox(): Rect | null {
-    return this.bound;
+    return null;
   }
 
-  // 영역 밖에서 누르면 mouseHandler 가 undefined 를 넘긴다. 그때도 켜지면 캔버스 어디를 눌러도 2배속이 된다
   onMouseDown?(e?: MouseEventArgs): void {
-    this.isEnabled = e !== undefined;
+    // 마우스 우클릭(button === 2) 시에만 2배속 활성화
+    this.isEnabled = e !== undefined && e.button === 2;
   }
 
-  onMouseUp?(_e?: MouseEventArgs): void {
-    this.isEnabled = false;
+  onMouseUp?(e?: MouseEventArgs): void {
+    if (!e || e.button === 2) {
+      this.isEnabled = false;
+    }
   }
 }

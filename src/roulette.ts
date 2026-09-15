@@ -48,6 +48,9 @@ export class Roulette extends EventTarget {
   private _winnerRange: WinnerRange = { start: 0, end: 0 };
   private _goalDist: number = Infinity;
   private _isRunning: boolean = false;
+  private _isPaused: boolean = false;
+  private _keysDown: Set<string> = new Set();
+  private _keyHoldDuration: number = 0;
   /** 진행 중에는 null, 당첨자가 모두 확정되면 당첨자 배열 */
   private _result: Marble[] | null = null;
 
@@ -108,32 +111,38 @@ export class Roulette extends EventTarget {
 
   @bound
   private _update() {
-    if (!this._lastTime) this._lastTime = Date.now();
-    const currentTime = Date.now();
-
-    this._elapsed += (currentTime - this._lastTime) * this._speed * this.fastForwarder.speed;
-    if (this._elapsed > 100) {
-      this._elapsed %= 100;
-    }
+    if (!this._lastTime) this._lastTime = performance.now();
+    const currentTime = performance.now();
+    const dt = currentTime - this._lastTime;
     this._lastTime = currentTime;
 
-    // _timeScale 은 _updateMarbles 에서 갱신되지만 물리 스텝 크기는 이 프레임 시작값으로 고정된다.
-    // 구슬 정지 판정도 같은 값을 써야 실제 진행된 물리 시간과 맞는다
-    const timeScale = this._timeScale;
-    const interval = (this._updateInterval / 1000) * timeScale;
+    if (!this._isPaused) {
+      this._elapsed += dt * this._speed * this.fastForwarder.speed;
+      if (this._elapsed > 100) {
+        this._elapsed %= 100;
+      }
 
-    while (this._elapsed >= this._updateInterval) {
-      this.physics.step(interval);
-      this._updateMarbles(this._updateInterval, timeScale);
-      this._particleManager.update(this._updateInterval);
-      this._updateEffects(this._updateInterval);
-      this._elapsed -= this._updateInterval;
-      this._uiObjects.forEach((obj) => obj.update(this._updateInterval));
+      // _timeScale 은 _updateMarbles 에서 갱신되지만 물리 스텝 크기는 이 프레임 시작값으로 고정된다.
+      // 구슬 정지 판정도 같은 값을 써야 실제 진행된 물리 시간과 맞는다
+      const timeScale = this._timeScale;
+      const interval = (this._updateInterval / 1000) * timeScale;
+
+      while (this._elapsed >= this._updateInterval) {
+        this.physics.step(interval);
+        this._updateMarbles(this._updateInterval, timeScale);
+        this._particleManager.update(this._updateInterval);
+        this._updateEffects(this._updateInterval);
+        this._elapsed -= this._updateInterval;
+        this._uiObjects.forEach((obj) => obj.update(this._updateInterval));
+      }
+
+      if (this._marbles.length > 1) {
+        this._marbles.sort((a, b) => b.y - a.y);
+      }
     }
 
-    if (this._marbles.length > 1) {
-      this._marbles.sort((a, b) => b.y - a.y);
-    }
+    // 방향키 카메라 수동 이동 처리 (일시정지 중에도 조작 가능)
+    this._handleKeyboardNavigation(dt);
 
     if (this._stage) {
       this._camera.update({
@@ -146,6 +155,31 @@ export class Roulette extends EventTarget {
 
     this._render();
     window.requestAnimationFrame(this._update);
+  }
+
+  private _handleKeyboardNavigation(dt: number) {
+    if (this._keysDown.size === 0) {
+      this._keyHoldDuration = 0;
+      return;
+    }
+
+    this._keyHoldDuration += dt;
+    // 적응형 가속: 누르고 있을수록 가속 (1.0 -> 최대 3.5)
+    const accelFactor = Math.min(3.5, 1 + this._keyHoldDuration / 500);
+    // 현재 줌에 반비례하여 화면상 체감 이동 속도를 균일하게 유지
+    const baseSpeed = (18 / Math.max(0.4, this._camera.zoom)) * (dt / 1000);
+    const moveDist = baseSpeed * accelFactor;
+
+    let dx = 0;
+    let dy = 0;
+    if (this._keysDown.has('ArrowLeft')) dx -= moveDist;
+    if (this._keysDown.has('ArrowRight')) dx += moveDist;
+    if (this._keysDown.has('ArrowUp')) dy -= moveDist;
+    if (this._keysDown.has('ArrowDown')) dy += moveDist;
+
+    if (dx !== 0 || dy !== 0) {
+      this._camera.pan(dx, dy);
+    }
   }
 
   private _updateMarbles(deltaTime: number, timeScale: number) {
@@ -206,6 +240,7 @@ export class Roulette extends EventTarget {
 
     this._result = ranked.slice(start, end + 1);
     this._isRunning = false;
+    this._isPaused = false;
     this.dispatchEvent(
       new CustomEvent('goal', {
         detail: { winner: this._result[0].name, winners: this._result.map((m) => m.name) },
@@ -249,6 +284,7 @@ export class Roulette extends EventTarget {
       result: this._result,
       size: { x: this._renderer.width, y: this._renderer.height },
       theme: this._theme,
+      isPaused: this._isPaused,
     };
     this._renderer.render(renderParams, this._uiObjects);
   }
@@ -327,6 +363,38 @@ export class Roulette extends EventTarget {
     canvas.addEventListener('click', (e) => {
       if (this.resultCloseHitAt(e)) {
         this._renderer.closeResultPopup();
+        return;
+      }
+      // 마우스 좌클릭 시 일시정지 / 재개 토글
+      if (e.button === 0 && this._isRunning) {
+        this.togglePause();
+      }
+    });
+
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
+      const activeTag = (document.activeElement as HTMLElement)?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        this._keysDown.add(e.key);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        this._camera.resetManual();
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        if (this._isRunning) {
+          this.togglePause();
+        }
+      }
+    });
+
+    window.addEventListener('keyup', (e: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        this._keysDown.delete(e.key);
+        if (this._keysDown.size === 0) {
+          this._keyHoldDuration = 0;
+        }
       }
     });
 
@@ -362,8 +430,18 @@ export class Roulette extends EventTarget {
     }
   }
 
+  public togglePause(): void {
+    if (!this._isRunning) return;
+    this._isPaused = !this._isPaused;
+  }
+
+  public get isPaused(): boolean {
+    return this._isPaused;
+  }
+
   public start() {
     this._isRunning = true;
+    this._isPaused = false;
     this._winnerRange = clipWinnerRange(options.winnerRange, this._marbles.length);
     this._camera.startFollowingMarbles();
 
@@ -486,6 +564,9 @@ export class Roulette extends EventTarget {
   }
 
   public reset() {
+    this._isPaused = false;
+    this._keysDown.clear();
+    this._keyHoldDuration = 0;
     this.clearMarbles();
     this._clearMap();
     this._loadMap();

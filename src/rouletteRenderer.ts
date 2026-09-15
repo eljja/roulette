@@ -25,6 +25,7 @@ export type RenderParameters = {
   result: Marble[] | null;
   size: VectorLike;
   theme: ColorTheme;
+  isPaused?: boolean;
 };
 
 const MAX_DISPLAY_WIDTH = 1920;
@@ -240,6 +241,38 @@ export class RouletteRenderer {
     this.renderResult(renderParameters);
 
     this._displayCtx.drawImage(this._sceneCanvas, 0, 0, this._canvas.width, this._canvas.height);
+
+    if (renderParameters.isPaused) {
+      this.renderPauseIndicator();
+    }
+  }
+
+  private renderPauseIndicator(): void {
+    const w = this._canvas.width;
+    const ctx = this._displayCtx;
+
+    ctx.save();
+    const badgeW = 140;
+    const badgeH = 44;
+    const x = (w - badgeW) / 2;
+    const y = 30;
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.beginPath();
+    ctx.roundRect(x, y, badgeW, badgeH, 10);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('❚❚  PAUSED', w / 2, y + badgeH / 2);
+
+    ctx.restore();
   }
 
   private renderEntities(entities: MapEntityState[]) {

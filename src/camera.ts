@@ -10,6 +10,7 @@ export class Camera {
   private _targetZoom: number = 1;
   private _locked = false;
   private _shouldFollowMarbles = false;
+  private _isManual = false;
 
   get zoom() {
     return this._zoom;
@@ -39,6 +40,10 @@ export class Camera {
     return this._position;
   }
 
+  get isManual(): boolean {
+    return this._isManual;
+  }
+
   setPosition(v: VectorLike, force: boolean = false) {
     if (force) {
       return (this._position = { x: v.x, y: v.y });
@@ -46,12 +51,28 @@ export class Camera {
     return (this._targetPosition = { x: v.x, y: v.y });
   }
 
+  pan(dx: number, dy: number) {
+    this._isManual = true;
+    this._targetPosition.x += dx;
+    this._targetPosition.y += dy;
+  }
+
+  resetManual() {
+    this._isManual = false;
+    this._locked = false;
+    this._shouldFollowMarbles = true;
+  }
+
   lock(v: boolean) {
     this._locked = v;
+    if (v) {
+      this._isManual = true;
+    }
   }
 
   startFollowingMarbles() {
     this._shouldFollowMarbles = true;
+    this._isManual = false;
   }
 
   initializePosition(center?: VectorLike, zoom?: number) {
@@ -64,6 +85,7 @@ export class Camera {
     this._zoom = z;
     this._targetZoom = z;
     this._shouldFollowMarbles = false;
+    this._isManual = false;
   }
 
   update({
@@ -77,17 +99,17 @@ export class Camera {
     needToZoom: boolean;
     targetIndex: number;
   }) {
-    // set target position
-    if (!this._locked) {
+    // 수동 조작(방향키 또는 미니맵 드래그)이 아닐 때만 자동 추적
+    if (!this._locked && !this._isManual) {
       this._calcTargetPositionAndZoom(marbles, stage, needToZoom, targetIndex);
     }
 
-    // interpolate position
-    this._position.x = this._interpolation(this.x, this._targetPosition.x, 120);
-    this._position.y = this._interpolation(this.y, this._targetPosition.y);
+    // 부드러운 위치 보간 (스냅 없이 연속적인 감속 보간 적용)
+    this._position.x = this._interpolation(this.x, this._targetPosition.x, 24);
+    this._position.y = this._interpolation(this.y, this._targetPosition.y, 14);
 
-    // interpolate zoom
-    this._zoom = this._interpolation(this._zoom, this._targetZoom);
+    // 초반 줌 아웃 시 급격한 수축을 완화하기 위해 완만하게 보간 (delta 35)
+    this._zoom = this._interpolation(this._zoom, this._targetZoom, 35);
   }
 
   private _calcTargetPositionAndZoom(marbles: Marble[], stage: StageDef, needToZoom: boolean, targetIndex: number) {
@@ -96,8 +118,20 @@ export class Camera {
     }
 
     if (marbles.length > 0) {
-      const targetMarble = marbles[targetIndex] ? marbles[targetIndex] : marbles[0];
-      this.setPosition(targetMarble.position);
+      const leadMarble = marbles[targetIndex] ?? marbles[0];
+      let targetX = leadMarble.x;
+      const targetY = leadMarble.y;
+
+      // 선두 그룹(상위 5개 또는 1등과 Y좌표 차이가 2.5 이내인 구슬들)의 X좌표 평균을 취해
+      // 1등이 좌우로 튈 때 카메라가 좌우로 요동치는 떨림을 완벽히 방지
+      const leadGroup = marbles.slice(0, Math.min(5, marbles.length)).filter((m) => Math.abs(m.y - leadMarble.y) < 2.5);
+
+      if (leadGroup.length > 1) {
+        targetX = leadGroup.reduce((sum, m) => sum + m.x, 0) / leadGroup.length;
+      }
+
+      this.setPosition({ x: targetX, y: targetY });
+
       if (needToZoom) {
         const goalDist = Math.abs(stage.zoomY - this._position.y);
         this.zoom = Math.max(1, (1 - goalDist / zoomThreshold) * 4);
@@ -111,10 +145,7 @@ export class Camera {
 
   private _interpolation(current: number, target: number, delta: number = 10) {
     const d = target - current;
-    if (Math.abs(d) < 1 / initialZoom) {
-      return target;
-    }
-
+    // 인위적인 스냅(snap) 제거: 완전히 연속적이고 부드러운 감속 이동 유지
     return current + d / delta;
   }
 
