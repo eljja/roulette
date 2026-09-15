@@ -30,9 +30,6 @@ export class Roulette extends EventTarget {
   private _marbles: Marble[] = [];
 
   private _lastTime: number = 0;
-  private _elapsed: number = 0;
-
-  private _updateInterval = 10;
   private _timeScale = 1;
   private _speed = 1;
 
@@ -113,27 +110,28 @@ export class Roulette extends EventTarget {
   private _update() {
     if (!this._lastTime) this._lastTime = performance.now();
     const currentTime = performance.now();
-    const dt = currentTime - this._lastTime;
+    const dt = Math.min(currentTime - this._lastTime, 100);
     this._lastTime = currentTime;
 
     if (!this._isPaused) {
-      this._elapsed += dt * this._speed * this.fastForwarder.speed;
-      if (this._elapsed > 100) {
-        this._elapsed %= 100;
-      }
-
-      // _timeScale 은 _updateMarbles 에서 갱신되지만 물리 스텝 크기는 이 프레임 시작값으로 고정된다.
-      // 구슬 정지 판정도 같은 값을 써야 실제 진행된 물리 시간과 맞는다
+      // 프레임 경과 시간에 배속 적용
+      const frameElapsed = dt * this._speed * this.fastForwarder.speed;
       const timeScale = this._timeScale;
-      const interval = (this._updateInterval / 1000) * timeScale;
 
-      while (this._elapsed >= this._updateInterval) {
-        this.physics.step(interval);
-        this._updateMarbles(this._updateInterval, timeScale);
-        this._particleManager.update(this._updateInterval);
-        this._updateEffects(this._updateInterval);
-        this._elapsed -= this._updateInterval;
-        this._uiObjects.forEach((obj) => obj.update(this._updateInterval));
+      // 모니터 주사율(60Hz, 120Hz, 144Hz 등)에 맞춘 서브스텝 분할:
+      // 고정 10ms 루프의 1스텝/2스텝 교번(aliasing)으로 인한 30Hz 미세 진동을 원천 제거하고,
+      // 매 디스플레이 프레임마다 모니터 주사율에 맞춰 정확하게 균일한 물리 이동량을 반영
+      const targetSubStepMs = 8.33; // 120Hz 수준의 안정적인 Box2D 물리 해상도 유지
+      const subSteps = Math.max(1, Math.round(frameElapsed / targetSubStepMs));
+      const subStepMs = frameElapsed / subSteps;
+      const subStepSec = (subStepMs / 1000) * timeScale;
+
+      for (let i = 0; i < subSteps; i++) {
+        this.physics.step(subStepSec);
+        this._updateMarbles(subStepMs, timeScale);
+        this._particleManager.update(subStepMs);
+        this._updateEffects(subStepMs);
+        this._uiObjects.forEach((obj) => obj.update(subStepMs));
       }
 
       if (this._marbles.length > 1) {
@@ -150,6 +148,7 @@ export class Roulette extends EventTarget {
         stage: this._stage,
         needToZoom: this._goalDist < zoomThreshold,
         targetIndex: this._winners.length > 0 ? this._targetIndex : 0,
+        deltaTime: dt / 1000,
       });
     }
 
