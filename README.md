@@ -1,47 +1,85 @@
-# Marble roulette
+# 🎱 마블 룰렛 (Marble Roulette)
 
-This is a lucky draw by dropping marbles.
+구슬을 굴려 당첨자를 뽑는 물리 기반 추첨기
 
-[Demo]( https://lazygyu.github.io/roulette )
+[![Demo](https://img.shields.io/badge/🎮_Live_Demo-eljja.github.io-blue?style=for-the-badge)](https://eljja.github.io/roulette/)
 
-# Requirements
+---
 
-- Typescript
-- Parcel
-- box2d-wasm
+## ✨ 주요 기능
 
-# Development
+| 기능 | 설명 |
+|------|------|
+| 🎱 물리 기반 구슬 시뮬레이션 | Box2D 물리 엔진으로 실제 구슬처럼 튕기고 굴러가는 시뮬레이션 |
+| 🎵 배경음악 (BGM) | 게임 시작 시 YouTube 음악 자동 재생, 결과 후 자동 종료 |
+| 🔊 효과음 | 구슬 골인, 우승 팡파르 등 다채로운 사운드 효과 |
+| 🗺️ 다양한 맵 | 여러 장애물 배치의 공식 맵 제공 |
+| 🛠️ 맵 에디터 | 직접 장애물을 배치해 나만의 맵 생성 및 공유 가능 |
+| 🏆 당첨 범위 | 1등, 꼴등, 여러 명 당첨 등 유연한 설정 |
+| ⚡ 스킬 효과 | 게임 중 구슬에 충격파 등 스킬 발동 |
+| 📹 자동 녹화 | 추첨 과정 영상 자동 녹화 |
+| 🎨 다크/라이트 테마 | 테마 전환 지원 |
+| 📋 프리셋 | 자주 쓰는 명단을 프리셋으로 저장/불러오기 |
+| 🔗 공유 | URL로 맵 및 참가자 명단 공유 |
+| 🔄 서바이벌 모드 | 당첨자 제외 후 다음 라운드 연속 진행 |
 
-```shell
-> yarn
-> yarn dev
+---
+
+## 🎮 사용 방법
+
+1. **명단 입력** - 참가자 이름을 쉼표 또는 줄바꿈으로 구분해 입력
+2. **당첨 설정** - 1등 / 꼴등 / 여러 명 중 당첨 방식 선택
+3. **[Start] 클릭** - 구슬 굴리기 시작, BGM과 함께 추첨 진행
+4. **결과 확인** - 우승 팡파르와 함께 결과 모달 표시
+
+### 고급 기능
+
+| 입력 형식 | 설명 |
+|----------|------|
+| `이름` | 기본 1개 구슬 |
+| `이름*3` | 구슬 3개 (출현 확률 3배) |
+| `이름/2` | 가중치 2배 |
+| `당첨, 꽝*3` | 당첨 1개 + 꽝 3개 |
+
+### 단축키
+
+| 키 | 동작 |
+|----|------|
+| `Space` / 클릭 | 일시 정지 / 재개 |
+| `Enter` | 카메라 선두 추적 복귀 |
+| `F` | 전체 맵 보기 토글 |
+| `1`~`9` | 해당 순위 구슬 카메라 포커스 |
+| `↑↓←→` | 카메라 수동 이동 |
+
+---
+
+## 🔧 로컬 개발
+
+```bash
+# 의존성 설치
+npm install
+
+# 개발 서버 (http://localhost:1235)
+npx parcel index.html --port 1235
+
+# 프로덕션 빌드
+npx parcel build index.html --public-url /roulette/
 ```
 
-# Build
+---
 
-```shell
-> yarn build
-```
+## 🛠️ 기술 스택
 
-# License
+- **TypeScript** - 타입 안전성
+- **Parcel** - 번들러
+- **Box2D (WASM)** - 2D 물리 엔진
+- **YouTube IFrame API** - BGM 재생
+- **Web Audio API** - 효과음 합성
+- **Canvas 2D** - 렌더링
 
-The source code is licensed under the [MIT License](./LICENSE).
+---
 
-## Trademark
+## 🙏 Credits
 
-**"Marble Roulette"™** and **"마블 룰렛"™** are trademarks of lazygyu
-(trademark applications pending in the Republic of Korea).
-
-The MIT License applies to the **source code only**. It does **not** grant any
-right to use these names, or any confusingly similar name, as the name or
-branding of your own project, product, or service.
-
-You may freely fork, modify, and redistribute this code, including for
-commercial purposes, but please publish it under a different name. Nominative
-use — factually referring to this project (e.g. "based on Marble Roulette by
-lazygyu") — is fine.
-
-**"마블 룰렛"™ / "Marble Roulette"™** 은 lazygyu의 상표이며 현재 대한민국
-특허청에 상표 출원 중입니다. 소스 코드는 MIT 라이선스를 따르지만 위 명칭 및
-이에 혼동을 줄 수 있는 유사 명칭은 라이선스 대상이 아닙니다. 포크·수정·재배포는
-자유롭게 하시되 다른 이름을 사용해 주세요.
+원작: [lazygyu](https://lazygyu.net)  
+수정/기능 추가: [eljja](https://github.com/eljja)

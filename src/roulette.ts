@@ -18,6 +18,8 @@ import type { UIObject } from './UIObject';
 import { bound } from './utils/bound.decorator';
 import { parseName, shuffle } from './utils/utils';
 import { VideoRecorder } from './utils/videoRecorder';
+import { BgmManager } from './bgmManager';
+import { SoundManager } from './soundManager';
 
 /** 입력 범위를 실제 구슬 수에 맞춰 자른다. 범위를 넘기면 뒤쪽이 잘린다 */
 function clipWinnerRange({ start, end }: WinnerRange, marbleCount: number): WinnerRange {
@@ -66,6 +68,11 @@ export class Roulette extends EventTarget {
   private _isReady: boolean = false;
   protected fastForwarder!: FastForwader;
   protected _theme: ColorTheme = Themes.dark;
+
+  private _bgmManager: BgmManager = new BgmManager();
+  private _soundManager: SoundManager = new SoundManager();
+  /** 구슬 골인 효과음 쿨다운 (너무 자주 재생 방지) ms */
+  private _goalSoundLastTime: number = 0;
 
   get isReady() {
     return this._isReady;
@@ -197,12 +204,19 @@ export class Roulette extends EventTarget {
         if (this._isRunning && this._isWinningRank(this._winners.length - 1)) {
           this._particleManager.shot(this._renderer.width, this._renderer.height);
         }
+        // 골인 효과음 (쿨다운 200ms)
+        const now = performance.now();
+        if (now - this._goalSoundLastTime > 200) {
+          this._soundManager.playGoalIn();
+          this._goalSoundLastTime = now;
+        }
         this._pendingRemovals.push(
           window.setTimeout(() => {
             this.physics.removeMarble(marble.id);
           }, 500)
         );
       }
+
     }
 
     const targetIndex = this._targetIndex;
@@ -241,6 +255,13 @@ export class Roulette extends EventTarget {
     this._result = ranked.slice(start, end + 1);
     this._isRunning = false;
     this._isPaused = false;
+
+    // 우승 팡파르 효과음 재생 & BGM 정지
+    this._soundManager.playFanfare();
+    setTimeout(() => {
+      this._bgmManager.stop();
+    }, 1500);
+
     this.dispatchEvent(
       new CustomEvent('goal', {
         detail: { winner: this._result[0].name, winners: this._result.map((m) => m.name) },
@@ -428,6 +449,8 @@ export class Roulette extends EventTarget {
     this._result = null;
     this._winners = [];
     this._marbles = [];
+    // 리셋 시 BGM 정지
+    this._bgmManager.stop();
   }
 
   public async startRecording() {
@@ -453,6 +476,10 @@ export class Roulette extends EventTarget {
     this._isPaused = false;
     this._winnerRange = clipWinnerRange(options.winnerRange, this._marbles.length);
     this._camera.startFollowingMarbles();
+
+    // BGM 시작 및 효과음 활성화 (첫 사용자 상호작용)
+    this._soundManager.unlock();
+    this._bgmManager.play();
 
     if (this._autoRecording) {
       this._recorder.start().then(() => {
