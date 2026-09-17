@@ -532,21 +532,37 @@ export class Roulette extends EventTarget {
     });
 
     const sp = this._stage?.spawnArea ?? { x: 9.25, y: 0, width: 7.25, height: 6 };
-    const aspect = sp.width / Math.max(sp.height, 1);
-    const cols = Math.max(1, Math.min(totalCount, Math.ceil(Math.sqrt(totalCount * aspect))));
-    const rows = Math.max(1, Math.ceil(totalCount / cols));
 
-    const marginX = sp.width * 0.12;
-    const marginY = sp.height * 0.12;
-    const spacingX = cols > 1 ? (sp.width - marginX * 2) / (cols - 1) : 0;
-    const spacingY = rows > 1 ? (sp.height - marginY * 2) / (rows - 1) : 0;
+    // 마블 물리 반경: 0.25 (지름: 0.50)
+    // 마블끼리 살짝 떨어진 간격 (gap = 0.10 -> spacing = 0.60)
+    const marbleSpacingX = 0.6;
+    const marbleSpacingY = 0.6;
+    const marginX = 0.45; // 좌우 벽과의 여유 공간
+    const marginY = 0.4; // 시작 영역 최상단 천장과의 여유 공간
+
+    // 가로 폭에서 한 줄에 최대로 들어갈 수 있는 열(column) 수
+    const availableWidth = Math.max(marbleSpacingX, sp.width - marginX * 2);
+    const maxCols = Math.max(1, Math.floor(availableWidth / marbleSpacingX) + 1);
+
+    // 구슬 개수가 maxCols 이하이면 1줄로 배치하여 모든 구슬이 동일한 최상단 Y 높이에서 공평하게 출발
+    const rows = Math.max(1, Math.ceil(totalCount / maxCols));
+    const cols = Math.max(1, Math.ceil(totalCount / rows));
+
+    // 세로 공간이 부족한 극단적인 경우(수백 개 등)에만 겹치지 않는 한도에서 Y 간격 축소
+    const actualSpacingY = Math.min(
+      marbleSpacingY,
+      rows > 1 ? Math.max(0.52, (sp.height - marginY * 2) / (rows - 1)) : marbleSpacingY
+    );
 
     const marblePositions: { x: number; y: number }[] = [];
     for (let i = 0; i < totalCount; i++) {
-      const col = cols > 1 ? i % cols : 0;
-      const row = cols > 1 ? Math.floor(i / cols) : i;
-      const x = sp.x + marginX + col * spacingX;
-      const y = sp.y + marginY + row * spacingY;
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const countInThisRow = Math.min(cols, totalCount - row * cols);
+      const rowWidth = (countInThisRow - 1) * marbleSpacingX;
+      const rowStartX = sp.x + (sp.width - rowWidth) / 2;
+      const x = countInThisRow > 1 ? rowStartX + col * marbleSpacingX : sp.x + sp.width / 2;
+      const y = sp.y + marginY + row * actualSpacingY;
       marblePositions.push({ x, y });
     }
 
@@ -559,26 +575,29 @@ export class Roulette extends EventTarget {
       if (member) {
         for (let j = 0; j < member.count; j++) {
           const order = orders.pop() || 0;
-          const pos = marblePositions[order] || { x: sp.x + sp.width / 2, y: sp.y + sp.height / 2 };
+          const pos = marblePositions[order] || { x: sp.x + sp.width / 2, y: sp.y + marginY };
           this._marbles.push(new Marble(this.physics, order, totalCount, member.name, member.weight, pos));
         }
       }
     });
 
-    // 카메라를 구슬 생성 위치(출발 영역) 중앙으로 이동 + 줌인
+    // 카메라를 구슬 생성 위치(출발 영역 상단)로 이동 + 줌인
     if (totalCount > 0) {
       const centerX = sp.x + sp.width / 2;
-      const centerY = sp.y + sp.height / 2;
+      const topY = sp.y + marginY;
+      const bottomY = sp.y + marginY + (rows - 1) * actualSpacingY;
+      const groupCenterY = (topY + bottomY) / 2;
+      const groupHeight = Math.max(sp.height, bottomY - topY + 2);
 
       const margin = 2.5;
       const viewW = canvasWidth / initialZoom;
       const viewH = canvasHeight / initialZoom;
       const zoom = Math.max(
         1.2,
-        Math.min(Math.min(viewW / (sp.width + margin * 2), viewH / (sp.height + margin * 2)), 3)
+        Math.min(Math.min(viewW / (sp.width + margin * 2), viewH / (groupHeight + margin * 2)), 2.8)
       );
 
-      this._camera.initializePosition({ x: centerX, y: centerY }, zoom);
+      this._camera.initializePosition({ x: centerX, y: groupCenterY + 1.0 }, zoom);
     }
   }
 

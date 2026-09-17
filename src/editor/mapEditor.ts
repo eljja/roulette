@@ -1319,21 +1319,32 @@ export class MapEditor {
       await physics.init();
       physics.createStage(this.stage);
 
-      // 출발 영역 기반 구슬 배치
+      // 출발 영역 기반 구슬 배치 (최상단부터 살짝 떨어진 간격으로 균등 배치)
       const sp = this.getSpawnArea();
-      const cols = 4;
-      const rows = 3;
-      const marginX = sp.width * 0.15;
-      const marginY = sp.height * 0.15;
-      const spacingX = (sp.width - marginX * 2) / Math.max(cols - 1, 1);
-      const spacingY = (sp.height - marginY * 2) / Math.max(rows - 1, 1);
+      const testCount = 12;
+      const marbleSpacingX = 0.6;
+      const marbleSpacingY = 0.6;
+      const marginX = 0.45;
+      const marginY = 0.4;
+
+      const availableWidth = Math.max(marbleSpacingX, sp.width - marginX * 2);
+      const maxCols = Math.max(1, Math.floor(availableWidth / marbleSpacingX) + 1);
+      const rows = Math.max(1, Math.ceil(testCount / maxCols));
+      const cols = Math.max(1, Math.ceil(testCount / rows));
+      const actualSpacingY = Math.min(
+        marbleSpacingY,
+        rows > 1 ? Math.max(0.52, (sp.height - marginY * 2) / (rows - 1)) : marbleSpacingY
+      );
 
       this.testMarbles = [];
-      for (let i = 0; i < cols * rows; i++) {
-        const col = i % cols;
+      for (let i = 0; i < testCount; i++) {
         const row = Math.floor(i / cols);
-        const x = sp.x + marginX + col * spacingX;
-        const y = sp.y + marginY + row * spacingY;
+        const col = i % cols;
+        const countInThisRow = Math.min(cols, testCount - row * cols);
+        const rowWidth = (countInThisRow - 1) * marbleSpacingX;
+        const rowStartX = sp.x + (sp.width - rowWidth) / 2;
+        const x = countInThisRow > 1 ? rowStartX + col * marbleSpacingX : sp.x + sp.width / 2;
+        const y = sp.y + marginY + row * actualSpacingY;
         const color = `hsl(${(i * 30) % 360}, 100%, 70%)`;
         physics.createMarble(i, x, y);
         this.testMarbles.push({ id: i, color });
