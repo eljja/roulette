@@ -1319,11 +1319,11 @@ export class MapEditor {
       await physics.init();
       physics.createStage(this.stage);
 
-      // 출발 영역 기반 구슬 배치 (최상단부터 살짝 떨어진 간격으로 균등 배치)
+      // 출발 영역 기반 구슬 배치 (간격 2배: gap = 0.20 -> spacing = 0.70)
       const sp = this.getSpawnArea();
       const testCount = 12;
-      const marbleSpacingX = 0.6;
-      const marbleSpacingY = 0.6;
+      const marbleSpacingX = 0.7;
+      const marbleSpacingY = 0.7;
       const marginX = 0.45;
       const marginY = 0.4;
 

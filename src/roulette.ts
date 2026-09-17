@@ -534,9 +534,9 @@ export class Roulette extends EventTarget {
     const sp = this._stage?.spawnArea ?? { x: 9.25, y: 0, width: 7.25, height: 6 };
 
     // 마블 물리 반경: 0.25 (지름: 0.50)
-    // 마블끼리 살짝 떨어진 간격 (gap = 0.10 -> spacing = 0.60)
-    const marbleSpacingX = 0.6;
-    const marbleSpacingY = 0.6;
+    // 마블끼리 떨어진 간격 (기존 gap = 0.10에서 2배인 0.20으로 적용 -> spacing = 0.70)
+    const marbleSpacingX = 0.7;
+    const marbleSpacingY = 0.7;
     const marginX = 0.45; // 좌우 벽과의 여유 공간
     const marginY = 0.4; // 시작 영역 최상단 천장과의 여유 공간
 
