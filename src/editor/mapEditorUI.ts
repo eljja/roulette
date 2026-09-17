@@ -54,6 +54,9 @@ export class MapEditorUI {
             <button id="btnZoomOut" title="축소">-</button>
             <button id="btnResetView" title="뷰 리셋">⌖</button>
           </div>
+          <button id="btnToggleMobileSidebar" class="btn-toggle-editor-sidebar" title="설정 사이드바 열기/닫기">
+            <span>☰ 메뉴</span>
+          </button>
           <div class="canvas-hints">
             <span>🗺️ 미니맵: 클릭/드래그 이동</span>
             <span>🖱️ 휠: 상하 스크롤 (Ctrl+휠: 줌)</span>
@@ -252,7 +255,7 @@ export class MapEditorUI {
       }
     });
 
-    // 팔레트 아이템 드래그 시작 설정
+    // 팔레트 아이템 드래그 및 모바일 탭 배치 설정
     const paletteItems = this.container.querySelectorAll('.palette-item');
     paletteItems.forEach((item) => {
       item.addEventListener('dragstart', (e: any) => {
@@ -260,6 +263,30 @@ export class MapEditorUI {
         const template = this.getTemplateData(type || 'pin');
         e.dataTransfer.setData('application/json', JSON.stringify(template));
       });
+
+      // 모바일 / 클릭 탭하여 배치(Tap-to-Place) 모드 지원
+      item.addEventListener('click', () => {
+        const type = item.getAttribute('data-type') || 'pin';
+        const template = this.getTemplateData(type);
+        if (this.editor.pendingPlacementTemplate?.label === template.label) {
+          this.editor.pendingPlacementTemplate = null;
+          paletteItems.forEach((p) => p.classList.remove('active-placement'));
+          this.showToast('배치 모드가 취소되었습니다.');
+        } else {
+          paletteItems.forEach((p) => p.classList.remove('active-placement'));
+          item.classList.add('active-placement');
+          this.editor.pendingPlacementTemplate = template;
+          this.showToast(`[${template.label}] 배치 모드: 캔버스를 터치/클릭하여 배치하세요.`);
+          if (window.innerWidth <= 768) {
+            this.toggleMobileSidebar(false);
+          }
+        }
+      });
+    });
+
+    // 모바일 사이드바 열기/닫기 토글
+    this.container.querySelector('#btnToggleMobileSidebar')?.addEventListener('click', () => {
+      this.toggleMobileSidebar();
     });
 
     // 뷰포트 조작 플로팅 버튼
@@ -643,6 +670,16 @@ export class MapEditorUI {
     toast.textContent = msg;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 2000);
+  }
+
+  private toggleMobileSidebar(forceState?: boolean) {
+    const sidebar = this.container.querySelector('.editor-sidebar');
+    if (!sidebar) return;
+    if (forceState !== undefined) {
+      sidebar.classList.toggle('mobile-hidden', !forceState);
+    } else {
+      sidebar.classList.toggle('mobile-hidden');
+    }
   }
 
   public destroy() {

@@ -53,7 +53,14 @@ export class Marble {
     return this.position.angle;
   }
 
-  constructor(physics: IPhysics, order: number, max: number, name?: string, weight: number = 1) {
+  constructor(
+    physics: IPhysics,
+    order: number,
+    max: number,
+    name?: string,
+    weight: number = 1,
+    initialPos?: { x: number; y: number }
+  ) {
     this.name = name || `M${order}`;
     this.weight = weight;
     this.physics = physics;
@@ -69,7 +76,11 @@ export class Marble {
     this.color = `hsl(${this.hue} 100% 70%)`;
     this.id = order;
 
-    physics.createMarble(order, 10.25 + (order % 10) * 0.6, maxLine - line + lineDelta);
+    if (initialPos) {
+      physics.createMarble(order, initialPos.x, initialPos.y);
+    } else {
+      physics.createMarble(order, 10.25 + (order % 10) * 0.6, maxLine - line + lineDelta);
+    }
   }
 
   /**
@@ -133,12 +144,11 @@ export class Marble {
     const viewPortTop = viewPort.y - viewPortHh;
     const viewPortBottom = viewPort.y + viewPortHh;
     const halfSize = this.size / 2;
-    const isOutsideView = (
+    const isOutsideView =
       this.x + halfSize < viewPortLeft ||
       this.x - halfSize > viewPortRight ||
       this.y + halfSize < viewPortTop ||
-      this.y - halfSize > viewPortBottom
-    );
+      this.y - halfSize > viewPortBottom;
     if (!isMinimap && isOutsideView) {
       return;
     }
@@ -177,6 +187,18 @@ export class Marble {
       });
     } else {
       this._drawMarbleBody(ctx, false);
+      const emojiMatch = this.name.match(/^\p{Extended_Pictographic}/u);
+      if (emojiMatch) {
+        transformGuard(ctx, () => {
+          ctx.translate(this.x, this.y);
+          ctx.rotate(this.angle);
+          ctx.scale(1 / zoom, 1 / zoom);
+          ctx.font = `${Math.round(this.size * zoom * 0.75)}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(emojiMatch[0], 0, 0);
+        });
+      }
     }
 
     ctx.shadowColor = '';

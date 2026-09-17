@@ -46,6 +46,7 @@ export class Roulette extends EventTarget {
   private _goalDist: number = Infinity;
   private _isRunning: boolean = false;
   private _isPaused: boolean = false;
+  private _isFullMapView: boolean = false;
   private _keysDown: Set<string> = new Set();
   private _keyHoldDuration: number = 0;
   /** 진행 중에는 null, 당첨자가 모두 확정되면 당첨자 배열 */
@@ -379,12 +380,21 @@ export class Roulette extends EventTarget {
         this._keysDown.add(e.key);
       } else if (e.key === 'Enter') {
         e.preventDefault();
+        this._isFullMapView = false;
         this._camera.resetManual();
+        this.dispatchEvent(new CustomEvent('message', { detail: '카메라: 선두 추적 복귀' }));
       } else if (e.code === 'Space') {
         e.preventDefault();
         if (this._isRunning) {
           this.togglePause();
         }
+      } else if (e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        this._toggleFullMapView();
+      } else if (e.key >= '1' && e.key <= '9') {
+        e.preventDefault();
+        const rankIdx = parseInt(e.key, 10) - 1;
+        this._focusMarbleByRank(rankIdx);
       }
     });
 
@@ -521,6 +531,25 @@ export class Roulette extends EventTarget {
       }
     });
 
+    const sp = this._stage?.spawnArea ?? { x: 9.25, y: 0, width: 7.25, height: 6 };
+    const aspect = sp.width / Math.max(sp.height, 1);
+    const cols = Math.max(1, Math.min(totalCount, Math.ceil(Math.sqrt(totalCount * aspect))));
+    const rows = Math.max(1, Math.ceil(totalCount / cols));
+
+    const marginX = sp.width * 0.12;
+    const marginY = sp.height * 0.12;
+    const spacingX = cols > 1 ? (sp.width - marginX * 2) / (cols - 1) : 0;
+    const spacingY = rows > 1 ? (sp.height - marginY * 2) / (rows - 1) : 0;
+
+    const marblePositions: { x: number; y: number }[] = [];
+    for (let i = 0; i < totalCount; i++) {
+      const col = cols > 1 ? i % cols : 0;
+      const row = cols > 1 ? Math.floor(i / cols) : i;
+      const x = sp.x + marginX + col * spacingX;
+      const y = sp.y + marginY + row * spacingY;
+      marblePositions.push({ x, y });
+    }
+
     const orders = shuffle(
       Array(totalCount)
         .fill(0)
@@ -530,31 +559,60 @@ export class Roulette extends EventTarget {
       if (member) {
         for (let j = 0; j < member.count; j++) {
           const order = orders.pop() || 0;
-          this._marbles.push(new Marble(this.physics, order, totalCount, member.name, member.weight));
+          const pos = marblePositions[order] || { x: sp.x + sp.width / 2, y: sp.y + sp.height / 2 };
+          this._marbles.push(new Marble(this.physics, order, totalCount, member.name, member.weight, pos));
         }
       }
     });
 
-    // 카메라를 구슬 생성 위치 중앙으로 이동 + 줌인
+    // 카메라를 구슬 생성 위치(출발 영역) 중앙으로 이동 + 줌인
     if (totalCount > 0) {
-      const cols = Math.min(totalCount, 10);
-      const rows = Math.ceil(totalCount / 10);
-      const lineDelta = -Math.max(0, Math.ceil(rows - 5));
-      const centerX = 10.25 + (cols - 1) * 0.3;
-      const centerY = (1 + rows) / 2 + lineDelta;
+      const centerX = sp.x + sp.width / 2;
+      const centerY = sp.y + sp.height / 2;
 
-      const spawnWidth = Math.max((cols - 1) * 0.6, 1);
-      const spawnHeight = Math.max(rows - 1, 1);
-      const margin = 3;
+      const margin = 2.5;
       const viewW = canvasWidth / initialZoom;
       const viewH = canvasHeight / initialZoom;
       const zoom = Math.max(
-        1.5,
-        Math.min(Math.min(viewW / (spawnWidth + margin * 2), viewH / (spawnHeight + margin * 2)), 3)
+        1.2,
+        Math.min(Math.min(viewW / (sp.width + margin * 2), viewH / (sp.height + margin * 2)), 3)
       );
 
       this._camera.initializePosition({ x: centerX, y: centerY }, zoom);
     }
+  }
+
+  private _toggleFullMapView() {
+    if (!this._stage) return;
+    if (this._isFullMapView) {
+      this._isFullMapView = false;
+      this._camera.resetManual();
+      this.dispatchEvent(new CustomEvent('message', { detail: '카메라: 선두 추적 모드' }));
+    } else {
+      this._isFullMapView = true;
+      const goalY = this._stage.goalY;
+      const viewW = canvasWidth / initialZoom;
+      const viewH = canvasHeight / initialZoom;
+      const targetZoom = Math.max(0.2, Math.min(viewW / 28, viewH / (goalY + 10)));
+      this._camera.setPosition({ x: 13, y: goalY / 2 }, false);
+      this._camera.zoom = targetZoom;
+      this._camera.lock(true);
+      this.dispatchEvent(new CustomEvent('message', { detail: '🔭 맵 전체 조망 (F / Enter로 복귀)' }));
+    }
+  }
+
+  private _focusMarbleByRank(rankIdx: number) {
+    if (!this._marbles || this._marbles.length <= rankIdx) return;
+    const marble = this._marbles[rankIdx];
+    this._isFullMapView = false;
+    this._camera.setPosition({ x: marble.x, y: marble.y }, false);
+    this._camera.zoom = 1.6;
+    this._camera.lock(true);
+    this.dispatchEvent(
+      new CustomEvent('message', {
+        detail: `🔍 #${rankIdx + 1} ${marble.name} 관전 (Enter로 복귀)`,
+      })
+    );
   }
 
   private _clearMap() {

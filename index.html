@@ -214,11 +214,259 @@
     document.querySelector('#in_rangeStart').addEventListener('change', () => selectWinnerType('multi', 'start'));
     document.querySelector('#in_rangeEnd').addEventListener('change', () => selectWinnerType('multi', 'end'));
 
-    window.roulette.addEventListener('goal', () => {
+    // ----------------- 명단 프리셋 관리 -----------------
+    const BUILTIN_PRESETS = {
+      '점심 메뉴': '짜장면, 짬뽕, 김치찌개, 돈까스, 햄버거, 쌀국수, 초밥, 제육볶음, 마라탕, 샌드위치',
+      '커피 내기': '당첨, 꽝*3',
+      '벌칙 정하기': '노래 부르기, 댄스, 물 한잔 원샷, 손목 맞기, 다음 판 간식 쏘기, 애교 부리기',
+      '숫자 1~10': '1, 2, 3, 4, 5, 6, 7, 8, 9, 10',
+      '숫자 1~20': '1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20',
+    };
+
+    function getCustomPresets() {
+      try {
+        const data = localStorage.getItem('mbr_custom_presets');
+        return data ? JSON.parse(data) : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function saveCustomPresets(presets) {
+      localStorage.setItem('mbr_custom_presets', JSON.stringify(presets));
+    }
+
+    function refreshPresetSelector(selectedVal) {
+      const slt = document.querySelector('#sltPreset');
+      if (!slt) return;
+      slt.innerHTML = '<option value="">-- 프리셋 선택 --</option>';
+
+      const builtinGroup = document.createElement('optgroup');
+      builtinGroup.label = '기본 프리셋';
+      Object.keys(BUILTIN_PRESETS).forEach((k) => {
+        const opt = document.createElement('option');
+        opt.value = `builtin:${k}`;
+        opt.textContent = k;
+        if (selectedVal === `builtin:${k}`) opt.selected = true;
+        builtinGroup.appendChild(opt);
+      });
+      slt.appendChild(builtinGroup);
+
+      const customPresets = getCustomPresets();
+      const customKeys = Object.keys(customPresets);
+      if (customKeys.length > 0) {
+        const customGroup = document.createElement('optgroup');
+        customGroup.label = '내 프리셋';
+        customKeys.forEach((k) => {
+          const opt = document.createElement('option');
+          opt.value = `custom:${k}`;
+          opt.textContent = k;
+          if (selectedVal === `custom:${k}`) opt.selected = true;
+          customGroup.appendChild(opt);
+        });
+        slt.appendChild(customGroup);
+      }
+    }
+
+    refreshPresetSelector();
+
+    document.querySelector('#sltPreset')?.addEventListener('change', (e) => {
+      const val = e.target.value;
+      if (!val) return;
+      let names = '';
+      if (val.startsWith('builtin:')) {
+        const key = val.replace('builtin:', '');
+        names = BUILTIN_PRESETS[key] || '';
+      } else if (val.startsWith('custom:')) {
+        const key = val.replace('custom:', '');
+        names = getCustomPresets()[key] || '';
+      }
+      if (names) {
+        document.querySelector('#in_names').value = names;
+        getReady();
+        simpleToast(`📋 '${val.split(':')[1]}' 프리셋을 불러왔습니다.`);
+      }
+    });
+
+    document.querySelector('#btnSavePreset')?.addEventListener('click', () => {
+      const namesVal = document.querySelector('#in_names').value.trim();
+      if (!namesVal) {
+        simpleToast('명단을 먼저 입력해주세요.');
+        return;
+      }
+      const presetName = prompt('저장할 프리셋 이름을 입력하세요:');
+      if (!presetName || !presetName.trim()) return;
+      const trimmed = presetName.trim();
+      const customPresets = getCustomPresets();
+      customPresets[trimmed] = namesVal;
+      saveCustomPresets(customPresets);
+      refreshPresetSelector(`custom:${trimmed}`);
+      simpleToast(`💾 '${trimmed}' 프리셋이 저장되었습니다.`);
+    });
+
+    document.querySelector('#btnDeletePreset')?.addEventListener('click', () => {
+      const slt = document.querySelector('#sltPreset');
+      const val = slt ? slt.value : '';
+      if (!val) {
+        simpleToast('삭제할 사용자 프리셋을 선택하세요.');
+        return;
+      }
+      if (val.startsWith('builtin:')) {
+        simpleToast('기본 프리셋은 삭제할 수 없습니다.');
+        return;
+      }
+      const key = val.replace('custom:', '');
+      if (confirm(`'${key}' 프리셋을 삭제하시겠습니까?`)) {
+        const customPresets = getCustomPresets();
+        delete customPresets[key];
+        saveCustomPresets(customPresets);
+        refreshPresetSelector();
+        simpleToast(`🗑️ '${key}' 프리셋이 삭제되었습니다.`);
+      }
+    });
+
+    // ----------------- 추첨 결과 모달 및 다음 판 연계 -----------------
+    const resultModal = document.querySelector('#resultModal');
+    const resultList = document.querySelector('#resultList');
+    const btnCloseResultModal = document.querySelector('#btnCloseResultModal');
+    const btnCopyResult = document.querySelector('#btnCopyResult');
+    const btnNextRoundExclude = document.querySelector('#btnNextRoundExclude');
+    const btnRestartSame = document.querySelector('#btnRestartSame');
+
+    let currentWinners = [];
+
+    function showResultModal(winners) {
+      currentWinners = winners || [];
+      if (!resultModal || !resultList) return;
+
+      resultList.innerHTML = '';
+      const range = window.roulette.getWinnerRange();
+      const startRank = (range?.start ?? 0) + 1;
+
+      currentWinners.forEach((name, idx) => {
+        const item = document.createElement('div');
+        item.className = 'winner-item';
+
+        const rankDiv = document.createElement('div');
+        rankDiv.className = 'winner-rank';
+        if (winnerType === 'last' && currentWinners.length === 1) {
+          rankDiv.textContent = '꼴등';
+        } else {
+          rankDiv.textContent = `${startRank + idx}등`;
+        }
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'winner-name';
+        nameDiv.textContent = name;
+
+        item.appendChild(rankDiv);
+        item.appendChild(nameDiv);
+        resultList.appendChild(item);
+      });
+
+      resultModal.classList.remove('hide');
+    }
+
+    function closeResultModal() {
+      if (resultModal) resultModal.classList.add('hide');
+      document.querySelector('#settings')?.classList.remove('hide');
+    }
+
+    btnCloseResultModal?.addEventListener('click', closeResultModal);
+
+    btnRestartSame?.addEventListener('click', () => {
+      closeResultModal();
+      getReady();
+      simpleToast('🔄 같은 명단으로 다시 준비되었습니다.');
+    });
+
+    btnCopyResult?.addEventListener('click', () => {
+      if (currentWinners.length === 0) return;
+      const range = window.roulette.getWinnerRange();
+      const startRank = (range?.start ?? 0) + 1;
+      const lines = ['[마블 룰렛 추첨 결과]'];
+      currentWinners.forEach((name, idx) => {
+        const rankStr = (winnerType === 'last' && currentWinners.length === 1) ? '꼴등' : `${startRank + idx}등`;
+        lines.push(`${rankStr}: ${name}`);
+      });
+      const textToCopy = lines.join('\n');
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          simpleToast('📋 결과가 클립보드에 복사되었습니다!');
+        }).catch(() => {
+          fallbackCopy(textToCopy);
+        });
+      } else {
+        fallbackCopy(textToCopy);
+      }
+    });
+
+    function fallbackCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        simpleToast('📋 결과가 클립보드에 복사되었습니다!');
+      } catch (e) {
+        prompt('아래 텍스트를 복사하세요:', text);
+      }
+      document.body.removeChild(ta);
+    }
+
+    btnNextRoundExclude?.addEventListener('click', () => {
+      if (currentWinners.length === 0) return;
+
+      const rawItems = getNames();
+      if (rawItems.length === 0) {
+        simpleToast('참가자 명단이 비어 있습니다.');
+        return;
+      }
+
+      // 각 항목 파싱
+      const parsedList = rawItems.map(itemStr => parseName(itemStr));
+      const winnersToExclude = [...currentWinners];
+
+      for (const winnerName of winnersToExclude) {
+        const target = parsedList.find(p => p.name === winnerName && p.count > 0);
+        if (target) {
+          target.count -= 1;
+        }
+      }
+
+      // 남은 항목들을 텍스트로 재구성
+      const remainingItems = [];
+      parsedList.forEach(p => {
+        if (p.count > 0) {
+          const weightPart = p.weight > 1 ? `/${p.weight}` : '';
+          const countPart = p.count > 1 ? `*${p.count}` : '';
+          remainingItems.push(`${p.name}${weightPart}${countPart}`);
+        }
+      });
+
+      if (remainingItems.length === 0) {
+        simpleToast('⚠️ 모든 참가자가 당첨되어 남은 참가자가 없습니다!');
+        return;
+      }
+
+      document.querySelector('#in_names').value = remainingItems.join(',');
+      localStorage.setItem('mbr_names', remainingItems.join(','));
+      closeResultModal();
+      getReady();
+      simpleToast(`⏭️ 당첨자 ${currentWinners.length}명을 제외하고 다음 판을 준비했습니다! (남은 구슬: ${window.roulette.getCount()}개)`);
+    });
+
+    window.roulette.addEventListener('goal', (e) => {
       ready = false;
+      const winners = (e.detail && e.detail.winners) ? e.detail.winners : (e.detail?.winner ? [e.detail.winner] : []);
       setTimeout(() => {
         document.querySelector('#settings').classList.remove('hide');
-      }, 3000);
+        showResultModal(winners);
+      }, 2000);
     });
 
     window.roulette.addEventListener('message', (e) => {
@@ -403,7 +651,16 @@
     </div>
   </div>
   <div class="left">
-    <h3 data-trans>Enter names below</h3>
+    <div class="names-header">
+      <h3 data-trans>Enter names below</h3>
+      <div class="preset-controls">
+        <select id="sltPreset" title="추천 및 저장된 명단 프리셋 선택">
+          <option value="">-- 프리셋 선택 --</option>
+        </select>
+        <button type="button" id="btnSavePreset" class="btn-sm" title="현재 명단을 새 프리셋으로 저장">저장</button>
+        <button type="button" id="btnDeletePreset" class="btn-sm btn-del" title="선택한 사용자 프리셋 삭제">삭제</button>
+      </div>
+    </div>
     <textarea id="in_names" placeholder="Input names separated by commas or line feed here" data-trans="placeholder">수박*2,키위*2,귤*2</textarea>
     <div class="actions">
       <button id="btnShuffle">
@@ -420,5 +677,19 @@
 <div class="copyright">&copy; 2022-2026. 마블 룰렛™ by <a href="https://lazygyu.net" target="_blank">lazygyu</a> (modified by eljja)
 </div>
 <div id="mapEditorOverlay" class="map-editor-overlay hide"></div>
+<div id="resultModal" class="result-modal hide">
+  <div class="result-modal-content">
+    <div class="result-modal-header">
+      <h3 id="resultTitle">🏆 추첨 결과</h3>
+      <button type="button" id="btnCloseResultModal" class="btn-close" title="닫기">&times;</button>
+    </div>
+    <div id="resultList" class="result-modal-body"></div>
+    <div class="result-modal-actions">
+      <button type="button" id="btnCopyResult" class="btn-copy">📋 결과 텍스트 복사</button>
+      <button type="button" id="btnNextRoundExclude" class="btn-exclude">⏭️ 당첨자 제외하고 다음 판 (서바이벌)</button>
+      <button type="button" id="btnRestartSame" class="btn-restart">🔄 같은 명단으로 다시 준비</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

@@ -84,8 +84,9 @@ export class MapEditor {
   private redoStack: string[] = [];
   private readonly MAX_HISTORY = 40;
 
-  // 복사 / 붙여넣기 (Ctrl+C / Ctrl+V)
+  // 복사 / 붙여넣기 (Ctrl+C / Ctrl+V) 및 모바일 탭 배치
   private copiedEntity: MapEntity | null = null;
+  public pendingPlacementTemplate: DragTemplateData | null = null;
   public lastMouseWorldPos: VectorLike = { x: 13, y: 10 };
 
   // 테스트 플레이 상태
@@ -470,6 +471,30 @@ export class MapEditor {
       }
 
       if (e.button === 0) {
+        // 0.5 탭하여 배치(Tap-to-Place) 모드 시 아이템 즉시 생성
+        if (this.pendingPlacementTemplate) {
+          this.saveHistory();
+          const template = this.pendingPlacementTemplate;
+          const snapX = Math.round(world.x * 2) / 2;
+          const snapY = Math.round(world.y * 2) / 2;
+          const newEntity: MapEntity = {
+            position: { x: snapX, y: snapY },
+            type: template.entityType,
+            shape: JSON.parse(JSON.stringify(template.defaultShape)),
+            props: JSON.parse(JSON.stringify(template.defaultProps)),
+          };
+          if (!this.stage.entities) this.stage.entities = [];
+          this.stage.entities.push(newEntity);
+          this.selectedIndex = this.stage.entities.length - 1;
+          this.activeHandle = null;
+          this.onSelectionChange?.(newEntity, this.selectedIndex);
+          this.onStageChange?.(this.stage);
+          this.onToast?.(`[${template.label}] 배치 완료!`);
+          this.pendingPlacementTemplate = null;
+          document.querySelectorAll('.palette-item').forEach((p) => p.classList.remove('active-placement'));
+          return;
+        }
+
         // 1. 현재 선택된 엔티티의 기즈모 핸들 클릭 여부 최우선 검사
         if (this.selectedIndex !== null && this.stage.entities?.[this.selectedIndex]) {
           const selEntity = this.stage.entities[this.selectedIndex];
@@ -958,6 +983,64 @@ export class MapEditor {
       this.activeHandle = null;
       this.canvas.style.cursor = '';
     });
+
+    // 모바일 / 태블릿 터치 이벤트 지원 (1점 터치: 조작/화면이동, 2점 터치: 핀치 줌)
+    let initialPinchDist = 0;
+    let initialPinchZoom = this.zoom;
+
+    this.canvas.addEventListener(
+      'touchstart',
+      (e: TouchEvent) => {
+        if (e.touches.length === 1) {
+          const touch = e.touches[0];
+          const mouseEvent = new MouseEvent('mousedown', {
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+            button: 0,
+          });
+          this.canvas.dispatchEvent(mouseEvent);
+        } else if (e.touches.length === 2) {
+          e.preventDefault();
+          const t1 = e.touches[0];
+          const t2 = e.touches[1];
+          initialPinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+          initialPinchZoom = this.zoom;
+        }
+      },
+      { passive: false }
+    );
+
+    this.canvas.addEventListener(
+      'touchmove',
+      (e: TouchEvent) => {
+        if (e.touches.length === 1) {
+          const touch = e.touches[0];
+          const mouseEvent = new MouseEvent('mousemove', {
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+          });
+          window.dispatchEvent(mouseEvent);
+        } else if (e.touches.length === 2 && initialPinchDist > 0) {
+          e.preventDefault();
+          const t1 = e.touches[0];
+          const t2 = e.touches[1];
+          const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+          const ratio = currentDist / initialPinchDist;
+          this.zoom = Math.max(6, Math.min(80, initialPinchZoom * ratio));
+        }
+      },
+      { passive: false }
+    );
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length === 0) {
+        const mouseEvent = new MouseEvent('mouseup', { button: 0 });
+        window.dispatchEvent(mouseEvent);
+        initialPinchDist = 0;
+      }
+    };
+    this.canvas.addEventListener('touchend', onTouchEnd);
+    this.canvas.addEventListener('touchcancel', onTouchEnd);
 
     // 더블 클릭: Polyline 정점 추가 및 삭제
     this.canvas.addEventListener('dblclick', (e: MouseEvent) => {
