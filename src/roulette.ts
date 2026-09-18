@@ -53,6 +53,8 @@ export class Roulette extends EventTarget {
   private _isFullMapView: boolean = false;
   private _keysDown: Set<string> = new Set();
   private _keyHoldDuration: number = 0;
+  private _isMiddleDragging: boolean = false;
+  private _lastMiddlePos: { x: number; y: number } = { x: 0, y: 0 };
   /** 진행 중에는 null, 당첨자가 모두 확정되면 당첨자 배열 */
   private _result: Marble[] | null = null;
 
@@ -368,6 +370,56 @@ export class Roulette extends EventTarget {
       window.removeEventListener('pointercancel', onPointerRelease);
     };
 
+    // 휠 클릭(마우스 중간 버튼) 드래그로 실제 맵 이동
+    canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        this._isMiddleDragging = true;
+        this._lastMiddlePos = { x: e.clientX, y: e.clientY };
+        canvas.style.cursor = 'grabbing';
+      }
+    });
+
+    window.addEventListener('pointermove', (e: PointerEvent) => {
+      if (this._isMiddleDragging) {
+        const dx = e.clientX - this._lastMiddlePos.x;
+        const dy = e.clientY - this._lastMiddlePos.y;
+        this._lastMiddlePos = { x: e.clientX, y: e.clientY };
+
+        const sizeFactor = this._renderer.sizeFactor;
+        const totalZoom = initialZoom * this._camera.zoom;
+        const worldDx = -(dx * sizeFactor) / totalZoom;
+        const worldDy = -(dy * sizeFactor) / totalZoom;
+
+        this._camera.pan(worldDx, worldDy, true);
+      }
+    });
+
+    const stopMiddleDrag = (e?: PointerEvent | MouseEvent) => {
+      if (this._isMiddleDragging) {
+        if (!e || (e as MouseEvent).button === 1 || e.type === 'blur') {
+          this._isMiddleDragging = false;
+          canvas.style.cursor = '';
+        }
+      }
+    };
+
+    window.addEventListener('pointerup', stopMiddleDrag);
+    window.addEventListener('pointercancel', stopMiddleDrag);
+    window.addEventListener('blur', () => stopMiddleDrag());
+
+    // 브라우저 기본 휠 클릭(스크롤 앵커 등) 방지
+    canvas.addEventListener('auxclick', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+      }
+    });
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+      }
+    });
+
     canvas.addEventListener('pointerdown', (e: Event) => {
       this.mouseHandler('MouseDown', e as MouseEvent);
       window.addEventListener('pointerup', onPointerRelease);
@@ -480,6 +532,10 @@ export class Roulette extends EventTarget {
     });
 
     canvas.addEventListener('pointermove', (e) => {
+      if (this._isMiddleDragging) {
+        canvas.style.cursor = 'grabbing';
+        return;
+      }
       if (this.resultCloseHitAt(e)) {
         canvas.style.cursor = 'pointer';
         return;

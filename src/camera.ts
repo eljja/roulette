@@ -93,12 +93,18 @@ export class Camera {
     return this._targetPosition;
   }
 
-  pan(dx: number, dy: number) {
+  pan(dx: number, dy: number, immediate: boolean = false) {
     this._isManual = true;
     this._targetPosition.x += dx;
     this._targetPosition.y += dy;
     this._filteredTarget.x = this._targetPosition.x;
     this._filteredTarget.y = this._targetPosition.y;
+    if (immediate) {
+      this._position.x += dx;
+      this._position.y += dy;
+      this._velocity.x = 0;
+      this._velocity.y = 0;
+    }
   }
 
   zoomBy(factor: number) {

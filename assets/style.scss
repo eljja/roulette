@@ -102,6 +102,14 @@ div.copyright a {
   &.user {
     mask-image: url('images/user.svg');
   }
+
+  &.music {
+    mask-image: url('images/music.svg');
+  }
+
+  &.music-slash {
+    mask-image: url('images/music-slash.svg');
+  }
 }
 
 
@@ -188,7 +196,16 @@ div.copyright a {
       display: flex;
       align-items: center;
       justify-content: stretch;
-      gap: 2px;
+      gap: 4px;
+      flex-wrap: wrap;
+
+      button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        cursor: pointer;
+      }
 
       div.sep {
         flex-grow: 1;

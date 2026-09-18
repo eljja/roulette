@@ -602,15 +602,23 @@
 
     // BGM 토글 버튼 제어
     const btnToggleBgm = document.querySelector('#btnToggleBgm');
+    const bgmIcon = document.querySelector('#bgmIcon');
+    const bgmText = document.querySelector('#bgmText');
     if (btnToggleBgm) {
       const updateBgmBtn = () => {
         const bgm = window.roulette?.getBgmManager?.();
         if (!bgm) return;
         const isMuted = bgm.isMuted;
-        btnToggleBgm.textContent = isMuted ? '🔇 BGM OFF' : '🎵 BGM ON';
-        btnToggleBgm.style.background = isMuted ? '#616161' : '#e91e63';
+        if (bgmText) {
+          bgmText.textContent = isMuted ? 'BGM OFF' : 'BGM ON';
+        }
+        if (bgmIcon) {
+          bgmIcon.className = isMuted ? 'icon music-slash' : 'icon music';
+        }
+        btnToggleBgm.style.opacity = isMuted ? '0.6' : '1.0';
       };
-      setTimeout(updateBgmBtn, 500);
+      setTimeout(updateBgmBtn, 200);
+      setTimeout(updateBgmBtn, 800);
       btnToggleBgm.addEventListener('click', () => {
         const bgm = window.roulette?.getBgmManager?.();
         if (bgm) {
@@ -868,15 +876,6 @@
       <i class="toggle-arrow">▲</i>
     </button>
     <div class="collapsible-rows collapsed">
-      <div class="row" style="display: flex; align-items: center; justify-content: space-between;">
-        <label>
-          <i class="icon record" style="filter: hue-rotate(90deg);"></i>
-          <span>배경음악 (BGM)</span>
-        </label>
-        <button type="button" id="btnToggleBgm" class="btn" style="background: #e91e63; color: white; padding: 4px 10px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold;">
-          🎵 BGM ON
-        </button>
-      </div>
       <div class="row">
         <label for='sltMap'>
           <i class="icon map"></i>
@@ -959,6 +958,10 @@
       <button id="btnStart">
         <i class="icon play"></i>
         <span data-trans>Start</span>
+      </button>
+      <button type="button" id="btnToggleBgm" title="배경음악 ON/OFF">
+        <i class="icon music" id="bgmIcon"></i>
+        <span id="bgmText">BGM ON</span>
       </button>
     </div>
   </div>
