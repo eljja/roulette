@@ -45,6 +45,15 @@ export class AvatarManager {
     AvatarManager.imgCache.delete(cleanName);
   }
 
+  public static clearAll(): void {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+      console.warn('Failed to clear avatars from localStorage:', e);
+    }
+    AvatarManager.imgCache.clear();
+  }
+
   public static hasAvatar(name: string): boolean {
     return !!AvatarManager.getAvatar(name);
   }

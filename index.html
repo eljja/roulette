@@ -799,18 +799,20 @@
     btnCloseAvatarModal?.addEventListener('click', closeAvatarModal);
     btnApplyAvatarModal?.addEventListener('click', closeAvatarModal);
 
-    btnClearAllAvatars?.addEventListener('click', () => {
-      if (confirm('모든 참가자의 등록된 얼굴 사진을 초기화하시겠습니까?')) {
-        const rawNames = getNames();
-        rawNames.forEach((s) => {
-          const name = parseName(s).name;
-          if (name && window.AvatarManager) window.AvatarManager.removeAvatar(name);
-        });
+    const handleClearAllAvatars = () => {
+      if (confirm('등록된 모든 마블 얼굴 사진을 초기화하시겠습니까?')) {
+        if (window.AvatarManager) {
+          window.AvatarManager.clearAll();
+        }
         renderAvatarList();
         getReady();
-        simpleToast('🗑️ 모든 사진이 초기화되었습니다.');
+        simpleToast('🗑️ 모든 마블 얼굴 사진이 초기화되었습니다.');
       }
-    });
+    };
+
+    btnClearAllAvatars?.addEventListener('click', handleClearAllAvatars);
+    const btnQuickClearAvatars = document.querySelector('#btnQuickClearAvatars');
+    btnQuickClearAvatars?.addEventListener('click', handleClearAllAvatars);
 
     // 아바타 모달 내 Ctrl+V 단축키 처리
     window.addEventListener('paste', async (e) => {
@@ -941,7 +943,10 @@
       </div>
     </div>
     <textarea id="in_names" placeholder="Input names separated by commas or line feed here" data-trans="placeholder">수박*2,키위*2,귤*2</textarea>
-    <div class="avatar-hint" style="font-size: 11px; color: #ffd700; margin: 4px 0 6px 0; opacity: 0.9; line-height: 1.4;">💡 <b>얼굴 사진 넣기:</b> 대기 중 구슬 클릭 후 복사한 사진 <code>Ctrl+V</code> 또는 아래 <b>[📷 얼굴 사진 관리]</b> 버튼 클릭</div>
+    <div class="avatar-hint" style="font-size: 11px; color: #ffd700; margin: 4px 0 6px 0; opacity: 0.9; line-height: 1.4; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
+      <span>💡 <b>얼굴 사진:</b> 구슬 클릭 후 <code>Ctrl+V</code> 또는 <b>[📷 얼굴 사진 관리]</b></span>
+      <button type="button" id="btnQuickClearAvatars" style="background: #c62828; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold;" title="등록된 모든 마블 얼굴 사진 초기화">🗑️ 전체 사진 초기화</button>
+    </div>
     <div class="actions">
       <button id="btnShuffle">
         <i class="icon shuffle"></i>

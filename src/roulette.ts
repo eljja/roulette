@@ -572,6 +572,11 @@ export class Roulette extends EventTarget {
     this.dispatchEvent(new CustomEvent('message', { detail: `🗑️ [${name}] 마블의 얼굴 사진이 삭제되었습니다.` }));
   }
 
+  public clearAllMarbleAvatars(): void {
+    AvatarManager.clearAll();
+    this.dispatchEvent(new CustomEvent('message', { detail: '🗑️ 모든 마블의 얼굴 사진이 초기화되었습니다.' }));
+  }
+
   public promptFileUpload(targetName?: string): void {
     const name = targetName || this._selectedMarble?.name;
     if (!name) return;
