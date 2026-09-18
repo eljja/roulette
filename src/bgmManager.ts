@@ -8,6 +8,7 @@ export class BgmManager {
   private _isReady: boolean = false;
   private _isPlaying: boolean = false;
   private _isMuted: boolean = false;
+  private _hasUserInteracted: boolean = false;
   private _volume: number = 50;
   private _container: HTMLElement | null = null;
   private _shouldPlay: boolean = true; // 진입하자마자 자동 재생 시도
@@ -72,14 +73,8 @@ export class BgmManager {
           this._player.setVolume(this._volume);
           if (this._isMuted) {
             this._player.mute();
-          } else if (this._shouldPlay) {
-            try {
-              this._player.unMute();
-              this._player.playVideo();
-              this._isPlaying = true;
-            } catch (e) {
-              console.warn('Autoplay blocked by browser policy, will play on first interaction:', e);
-            }
+          } else if (this._hasUserInteracted || this._shouldPlay) {
+            this.play();
           }
         },
         onStateChange: (event: any) => {
@@ -100,38 +95,29 @@ export class BgmManager {
   }
 
   /**
-   * 브라우저 자동 재생 정책 해제 핸들러: 마우스 이동, 휠, 포커스 등 아주 미세한 동작만으로도 즉시 BGM 활성화
+   * 브라우저 자동 재생 정책 해제 핸들러: 화면 어느 곳이든 클릭, 터치, 키 입력 등 사용자 상호작용 발생 즉시 BGM 재생
    */
   private _setupAutoplayUnlock() {
     const unlockAndPlay = () => {
+      this._hasUserInteracted = true;
       if (this._isMuted) return;
       this._shouldPlay = true;
-      if (this._isReady && this._player) {
-        try {
-          this._player.unMute();
-          this._player.setVolume(this._volume);
-          this._player.playVideo();
-          this._isPlaying = true;
-        } catch (e) {
-          console.warn('Failed to unlock and play BGM:', e);
-        }
+      if (this._isReady && this._player && !this._isPlaying) {
+        this.play();
       }
     };
 
     const events = [
-      'mousemove',
-      'pointermove',
-      'mouseenter',
-      'scroll',
-      'wheel',
-      'focus',
-      'click',
       'pointerdown',
+      'mousedown',
+      'click',
       'keydown',
       'touchstart',
+      'touchend',
+      'wheel',
     ];
     events.forEach((evt) => {
-      window.addEventListener(evt, unlockAndPlay, { once: true, passive: true });
+      window.addEventListener(evt, unlockAndPlay, { passive: true });
     });
   }
 
