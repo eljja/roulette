@@ -67,12 +67,12 @@ export class SoundManager {
   public playFanfare() {
     const ctx = this._getCtx();
     const notes = [
-      { freq: 523, start: 0, dur: 0.15 },    // C5
+      { freq: 523, start: 0, dur: 0.15 }, // C5
       { freq: 659, start: 0.15, dur: 0.15 }, // E5
-      { freq: 784, start: 0.3, dur: 0.15 },  // G5
+      { freq: 784, start: 0.3, dur: 0.15 }, // G5
       { freq: 1047, start: 0.45, dur: 0.4 }, // C6
       { freq: 784, start: 0.65, dur: 0.15 }, // G5
-      { freq: 1047, start: 0.8, dur: 0.6 },  // C6
+      { freq: 1047, start: 0.8, dur: 0.6 }, // C6
     ];
 
     const totalDur = 1.4;
@@ -89,13 +89,15 @@ export class SoundManager {
         let env = 0;
         if (rel < 0.05) env = rel / 0.05;
         else if (rel < 0.3) env = 1.0;
-        else if (rel < 0.5) env = 1.0 - (rel - 0.3) / 0.2 * 0.3;
+        else if (rel < 0.5) env = 1.0 - ((rel - 0.3) / 0.2) * 0.3;
         else env = 0.7 * (1.0 - (rel - 0.5) / 0.5);
 
         // 기본 사인파 + 2배음 추가로 화려하게
-        data[i] += (Math.sin(2 * Math.PI * freq * t) * 0.5
-                  + Math.sin(2 * Math.PI * freq * 2 * t) * 0.2
-                  + Math.sin(2 * Math.PI * freq * 3 * t) * 0.1) * env;
+        data[i] +=
+          (Math.sin(2 * Math.PI * freq * t) * 0.5 +
+            Math.sin(2 * Math.PI * freq * 2 * t) * 0.2 +
+            Math.sin(2 * Math.PI * freq * 3 * t) * 0.1) *
+          env;
       }
     });
 

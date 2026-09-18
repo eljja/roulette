@@ -17,6 +17,7 @@ export class Marble {
   weight: number = 1;
   skill: Skills = Skills.None;
   isActive: boolean = false;
+  isSelected: boolean = false;
 
   private _skillRate = 0.0005;
   private _coolTime = 5000;
@@ -183,7 +184,18 @@ export class Marble {
       transformGuard(ctx, () => {
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
+        ctx.beginPath();
+        ctx.arc(0, 0, hs, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
         ctx.drawImage(skin, -hs, -hs, hs * 2, hs * 2);
+      });
+      transformGuard(ctx, () => {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, hs, 0, Math.PI * 2);
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 1.5 / zoom;
+        ctx.stroke();
       });
     } else {
       this._drawMarbleBody(ctx, false);
@@ -199,6 +211,18 @@ export class Marble {
           ctx.fillText(emojiMatch[0], 0, 0);
         });
       }
+    }
+
+    if (this.isSelected) {
+      transformGuard(ctx, () => {
+        ctx.translate(this.x, this.y);
+        ctx.beginPath();
+        const pulse = 1.0 + 0.12 * Math.sin(Date.now() * 0.008);
+        ctx.arc(0, 0, (hs + 3 / zoom) * pulse, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ffd700';
+        ctx.lineWidth = 3 / zoom;
+        ctx.stroke();
+      });
     }
 
     ctx.shadowColor = '';

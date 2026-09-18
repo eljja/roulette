@@ -1,3 +1,4 @@
+import { AvatarManager } from './avatarManager';
 import type { Camera } from './camera';
 import { canvasHeight, canvasWidth, initialZoom, Themes, winnerAreaHeight } from './data/constants';
 import type { StageDef } from './data/maps';
@@ -202,6 +203,11 @@ export class RouletteRenderer {
   }
 
   private getMarbleImage(name: string): CanvasImageSource | undefined {
+    // Priority 0: Custom avatar (localStorage / AvatarManager)
+    const customAvatar = AvatarManager.getImageElement(name);
+    if (customAvatar) {
+      return customAvatar;
+    }
     // Priority 1: Hardcoded images
     if (this._images[name]) {
       return this._images[name];

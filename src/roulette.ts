@@ -1,3 +1,5 @@
+import { AvatarManager } from './avatarManager';
+import { BgmManager } from './bgmManager';
 import { Camera } from './camera';
 import { canvasHeight, canvasWidth, initialZoom, Skills, Themes, zoomThreshold } from './data/constants';
 import { type StageDef, stages } from './data/maps';
@@ -12,14 +14,13 @@ import { Box2dPhysics } from './physics-box2d';
 import { RankRenderer } from './rankRenderer';
 import { RouletteRenderer } from './rouletteRenderer';
 import { SkillEffect } from './skillEffect';
+import { SoundManager } from './soundManager';
 import type { ColorTheme } from './types/ColorTheme';
 import type { MouseEventHandlerName, MouseEventName } from './types/mouseEvents.type';
 import type { UIObject } from './UIObject';
 import { bound } from './utils/bound.decorator';
 import { parseName, shuffle } from './utils/utils';
 import { VideoRecorder } from './utils/videoRecorder';
-import { BgmManager } from './bgmManager';
-import { SoundManager } from './soundManager';
 
 /** 입력 범위를 실제 구슬 수에 맞춰 자른다. 범위를 넘기면 뒤쪽이 잘린다 */
 function clipWinnerRange({ start, end }: WinnerRange, marbleCount: number): WinnerRange {
@@ -30,6 +31,7 @@ function clipWinnerRange({ start, end }: WinnerRange, marbleCount: number): Winn
 
 export class Roulette extends EventTarget {
   private _marbles: Marble[] = [];
+  private _selectedMarble: Marble | null = null;
 
   private _lastTime: number = 0;
   private _timeScale = 1;
@@ -216,7 +218,6 @@ export class Roulette extends EventTarget {
           }, 500)
         );
       }
-
     }
 
     const targetIndex = this._targetIndex;
@@ -386,15 +387,65 @@ export class Roulette extends EventTarget {
         this._renderer.closeResultPopup();
         return;
       }
-      // 마우스 좌클릭 시 일시정지 / 재개 토글
-      if (e.button === 0 && this._isRunning) {
-        this.togglePause();
+      // 마우스 좌클릭 시: 주행 중이면 일시정지 / 재개, 대기 중이면 마블 선택
+      if (e.button === 0) {
+        if (this._isRunning) {
+          this.togglePause();
+        } else {
+          this._handleMarbleClick(e);
+        }
+      }
+    });
+
+    window.addEventListener('paste', async (e: ClipboardEvent) => {
+      const activeTag = (document.activeElement as HTMLElement)?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+
+      if (!this._selectedMarble) return;
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+          const blob = item.getAsFile();
+          if (blob) {
+            e.preventDefault();
+            try {
+              const dataUrl = await AvatarManager.processImageBlob(blob);
+              AvatarManager.setAvatar(this._selectedMarble.name, dataUrl);
+              this.dispatchEvent(
+                new CustomEvent('message', {
+                  detail: `📷 [${this._selectedMarble.name}] 마블에 얼굴 사진이 등록되었습니다!`,
+                })
+              );
+            } catch (err) {
+              console.error('Failed to process image:', err);
+              this.dispatchEvent(new CustomEvent('message', { detail: '⚠️ 이미지 처리 중 오류가 발생했습니다.' }));
+            }
+            break;
+          }
+        }
       }
     });
 
     window.addEventListener('keydown', (e: KeyboardEvent) => {
       const activeTag = (document.activeElement as HTMLElement)?.tagName;
       if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && this._selectedMarble) {
+        if (AvatarManager.hasAvatar(this._selectedMarble.name)) {
+          e.preventDefault();
+          AvatarManager.removeAvatar(this._selectedMarble.name);
+          this.dispatchEvent(
+            new CustomEvent('message', {
+              detail: `🗑️ [${this._selectedMarble.name}] 마블의 얼굴 사진이 삭제되었습니다.`,
+            })
+          );
+          return;
+        }
+      }
 
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
@@ -442,7 +493,55 @@ export class Roulette extends EventTarget {
     this._camera.initializePosition();
   }
 
+  public selectMarble(marble: Marble): void {
+    if (this._selectedMarble && this._selectedMarble !== marble) {
+      this._selectedMarble.isSelected = false;
+    }
+    this._selectedMarble = marble;
+    marble.isSelected = true;
+    const hasAvatar = AvatarManager.hasAvatar(marble.name);
+    const hint = hasAvatar
+      ? `📷 [${marble.name}] 선택됨 (현재 사진 적용 중, Delete키로 삭제 가능)`
+      : `📷 [${marble.name}] 선택됨! 사진 복사 후 Ctrl+V 로 얼굴 등록`;
+    this.dispatchEvent(new CustomEvent('message', { detail: hint }));
+  }
+
+  public clearSelectedMarble(): void {
+    if (this._selectedMarble) {
+      this._selectedMarble.isSelected = false;
+      this._selectedMarble = null;
+    }
+  }
+
+  private _handleMarbleClick(e: MouseEvent): void {
+    const sizeFactor = this._renderer.sizeFactor;
+    const sceneX = e.offsetX * sizeFactor;
+    const sceneY = e.offsetY * sizeFactor;
+    const totalZoom = initialZoom * this._camera.zoom;
+    const worldX = this._camera.x + (sceneX - this._renderer.width / 2) / totalZoom;
+    const worldY = this._camera.y + (sceneY - this._renderer.height / 2) / totalZoom;
+
+    let closestMarble: Marble | null = null;
+    let minDist = Infinity;
+
+    for (const m of this._marbles) {
+      const dist = Math.hypot(m.x - worldX, m.y - worldY);
+      const hitRadius = Math.max(m.size * 0.75, 0.4);
+      if (dist <= hitRadius && dist < minDist) {
+        minDist = dist;
+        closestMarble = m;
+      }
+    }
+
+    if (closestMarble) {
+      this.selectMarble(closestMarble);
+    } else {
+      this.clearSelectedMarble();
+    }
+  }
+
   public clearMarbles() {
+    this.clearSelectedMarble();
     this._pendingRemovals.forEach((id) => window.clearTimeout(id));
     this._pendingRemovals = [];
     this.physics.clearMarbles();
