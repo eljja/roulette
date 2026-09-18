@@ -572,6 +572,247 @@
     // };
     // setTimeout(checkDonateButtonLoaded, 100);
 
+    // BGM 토글 버튼 제어
+    const btnToggleBgm = document.querySelector('#btnToggleBgm');
+    if (btnToggleBgm) {
+      const updateBgmBtn = () => {
+        const bgm = window.roulette?.getBgmManager?.();
+        if (!bgm) return;
+        const isMuted = bgm.isMuted;
+        btnToggleBgm.textContent = isMuted ? '🔇 BGM OFF' : '🎵 BGM ON';
+        btnToggleBgm.style.background = isMuted ? '#616161' : '#e91e63';
+      };
+      setTimeout(updateBgmBtn, 500);
+      btnToggleBgm.addEventListener('click', () => {
+        const bgm = window.roulette?.getBgmManager?.();
+        if (bgm) {
+          bgm.toggleMute();
+          updateBgmBtn();
+        }
+      });
+    }
+
+    // 얼굴 사진 관리 모달 제어
+    const avatarModal = document.querySelector('#avatarModal');
+    const btnOpenAvatarModal = document.querySelector('#btnOpenAvatarModal');
+    const btnCloseAvatarModal = document.querySelector('#btnCloseAvatarModal');
+    const btnApplyAvatarModal = document.querySelector('#btnApplyAvatarModal');
+    const btnClearAllAvatars = document.querySelector('#btnClearAllAvatars');
+    const avatarListContainer = document.querySelector('#avatarList');
+    let selectedAvatarTarget = null;
+
+    function renderAvatarList() {
+      if (!avatarListContainer) return;
+      avatarListContainer.innerHTML = '';
+      const rawNames = getNames();
+      const uniqueNames = [...new Set(rawNames.map((s) => parseName(s).name).filter(Boolean))];
+
+      if (uniqueNames.length === 0) {
+        avatarListContainer.innerHTML = '<div style="text-align:center; padding: 20px; color:#aaa;">참가자 명단을 먼저 입력해주세요.</div>';
+        return;
+      }
+
+      uniqueNames.forEach((name) => {
+        const row = document.createElement('div');
+        row.className = 'avatar-item-row';
+        row.style.cssText =
+          'display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.06); border-radius: 8px; gap: 10px; cursor: pointer; transition: background 0.2s;';
+        if (selectedAvatarTarget === name) {
+          row.style.outline = '2px solid #ffd700';
+          row.style.background = 'rgba(255, 215, 0, 0.12)';
+        }
+
+        const left = document.createElement('div');
+        left.style.cssText = 'display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;';
+
+        const thumb = document.createElement('div');
+        thumb.style.cssText =
+          'width: 44px; height: 44px; border-radius: 50%; background: #222; overflow: hidden; border: 2px solid #ffd700; flex-shrink: 0; display: flex; align-items: center; justify-content: center;';
+
+        const avatarDataUrl = window.AvatarManager ? window.AvatarManager.getAvatar(name) : null;
+        if (avatarDataUrl) {
+          const img = document.createElement('img');
+          img.src = avatarDataUrl;
+          img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+          thumb.appendChild(img);
+        } else {
+          thumb.innerHTML = '<span style="font-size: 20px; opacity: 0.6;">👤</span>';
+        }
+
+        const nameLabel = document.createElement('div');
+        nameLabel.style.cssText = 'font-weight: bold; font-size: 14px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+        nameLabel.textContent = name;
+        if (avatarDataUrl) {
+          const sub = document.createElement('div');
+          sub.style.cssText = 'font-size: 11px; color: #66bb6a; font-weight: normal;';
+          sub.textContent = '사진 등록 완료';
+          nameLabel.appendChild(sub);
+        } else {
+          const sub = document.createElement('div');
+          sub.style.cssText = 'font-size: 11px; color: #bbb; font-weight: normal;';
+          sub.textContent = '사진 미등록 (기본 구슬)';
+          nameLabel.appendChild(sub);
+        }
+
+        left.appendChild(thumb);
+        left.appendChild(nameLabel);
+
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display: flex; align-items: center; gap: 6px; flex-shrink: 0;';
+
+        // 파일 업로드 input
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.style.display = 'none';
+        fileInput.onchange = async () => {
+          const file = fileInput.files && fileInput.files[0];
+          if (file && window.AvatarManager) {
+            try {
+              const dataUrl = await window.AvatarManager.processImageBlob(file);
+              window.AvatarManager.setAvatar(name, dataUrl);
+              renderAvatarList();
+              getReady();
+              simpleToast(`📷 [${name}] 사진이 등록되었습니다!`);
+            } catch (err) {
+              console.error(err);
+              simpleToast('⚠️ 이미지 처리 실패');
+            }
+          }
+        };
+
+        const btnSelectFile = document.createElement('button');
+        btnSelectFile.type = 'button';
+        btnSelectFile.className = 'btn-sm';
+        btnSelectFile.style.cssText = 'padding: 5px 10px; font-size: 12px; background: #0288d1; color: #fff; border-radius: 4px; border: none; cursor: pointer; font-weight: bold;';
+        btnSelectFile.textContent = '📷 사진 선택';
+        btnSelectFile.onclick = (e) => {
+          e.stopPropagation();
+          fileInput.click();
+        };
+
+        const btnPaste = document.createElement('button');
+        btnPaste.type = 'button';
+        btnPaste.className = 'btn-sm';
+        btnPaste.style.cssText = 'padding: 5px 10px; font-size: 12px; background: #f57c00; color: #fff; border-radius: 4px; border: none; cursor: pointer; font-weight: bold;';
+        btnPaste.textContent = '📋 붙여넣기';
+        btnPaste.onclick = async (e) => {
+          e.stopPropagation();
+          selectedAvatarTarget = name;
+          try {
+            const clipboardItems = await navigator.clipboard.read();
+            for (const item of clipboardItems) {
+              const imageType = item.types.find((type) => type.startsWith('image/'));
+              if (imageType) {
+                const blob = await item.getType(imageType);
+                if (window.AvatarManager) {
+                  const dataUrl = await window.AvatarManager.processImageBlob(blob);
+                  window.AvatarManager.setAvatar(name, dataUrl);
+                  renderAvatarList();
+                  getReady();
+                  simpleToast(`📷 [${name}] 사진이 등록되었습니다!`);
+                  return;
+                }
+              }
+            }
+            simpleToast('⚠️ 클립보드에 복사된 이미지가 없습니다. 사진을 먼저 복사(Ctrl+C)해주세요.');
+          } catch (err) {
+            simpleToast('💡 사진 복사(Ctrl+C) 후 이 창에서 Ctrl+V를 누르세요.');
+          }
+        };
+
+        const btnDel = document.createElement('button');
+        btnDel.type = 'button';
+        btnDel.className = 'btn-sm btn-del';
+        btnDel.style.cssText = 'padding: 5px 8px; font-size: 12px; border-radius: 4px; cursor: pointer;';
+        btnDel.textContent = '🗑️';
+        btnDel.title = '사진 삭제';
+        btnDel.onclick = (e) => {
+          e.stopPropagation();
+          if (window.AvatarManager) {
+            window.AvatarManager.removeAvatar(name);
+            renderAvatarList();
+            getReady();
+            simpleToast(`🗑️ [${name}] 사진이 삭제되었습니다.`);
+          }
+        };
+
+        actions.appendChild(fileInput);
+        actions.appendChild(btnSelectFile);
+        actions.appendChild(btnPaste);
+        if (avatarDataUrl) {
+          actions.appendChild(btnDel);
+        }
+
+        row.appendChild(left);
+        row.appendChild(actions);
+
+        row.onclick = () => {
+          selectedAvatarTarget = name;
+          renderAvatarList();
+        };
+
+        avatarListContainer.appendChild(row);
+      });
+    }
+
+    if (btnOpenAvatarModal) {
+      btnOpenAvatarModal.addEventListener('click', () => {
+        renderAvatarList();
+        avatarModal.classList.remove('hide');
+      });
+    }
+
+    const closeAvatarModal = () => {
+      avatarModal.classList.add('hide');
+      getReady();
+    };
+
+    btnCloseAvatarModal?.addEventListener('click', closeAvatarModal);
+    btnApplyAvatarModal?.addEventListener('click', closeAvatarModal);
+
+    btnClearAllAvatars?.addEventListener('click', () => {
+      if (confirm('모든 참가자의 등록된 얼굴 사진을 초기화하시겠습니까?')) {
+        const rawNames = getNames();
+        rawNames.forEach((s) => {
+          const name = parseName(s).name;
+          if (name && window.AvatarManager) window.AvatarManager.removeAvatar(name);
+        });
+        renderAvatarList();
+        getReady();
+        simpleToast('🗑️ 모든 사진이 초기화되었습니다.');
+      }
+    });
+
+    // 아바타 모달 내 Ctrl+V 단축키 처리
+    window.addEventListener('paste', async (e) => {
+      if (avatarModal.classList.contains('hide')) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const blob = items[i].getAsFile();
+          if (blob && window.AvatarManager) {
+            e.preventDefault();
+            const targetName = selectedAvatarTarget || getNames().map((s) => parseName(s).name)[0];
+            if (targetName) {
+              try {
+                const dataUrl = await window.AvatarManager.processImageBlob(blob);
+                window.AvatarManager.setAvatar(targetName, dataUrl);
+                renderAvatarList();
+                getReady();
+                simpleToast(`📷 [${targetName}] 얼굴 사진이 등록되었습니다!`);
+              } catch (err) {
+                console.error(err);
+              }
+            }
+            break;
+          }
+        }
+      }
+    });
+
     function simpleToast(msg) {
       const toast = document.createElement('div');
       toast.classList.add('toast');
@@ -597,6 +838,15 @@
       <i class="toggle-arrow">▲</i>
     </button>
     <div class="collapsible-rows collapsed">
+      <div class="row" style="display: flex; align-items: center; justify-content: space-between;">
+        <label>
+          <i class="icon record" style="filter: hue-rotate(90deg);"></i>
+          <span>배경음악 (BGM)</span>
+        </label>
+        <button type="button" id="btnToggleBgm" class="btn" style="background: #e91e63; color: white; padding: 4px 10px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold;">
+          🎵 BGM ON
+        </button>
+      </div>
       <div class="row">
         <label for='sltMap'>
           <i class="icon map"></i>
@@ -662,11 +912,14 @@
       </div>
     </div>
     <textarea id="in_names" placeholder="Input names separated by commas or line feed here" data-trans="placeholder">수박*2,키위*2,귤*2</textarea>
-    <div class="avatar-hint" style="font-size: 11px; color: #ffd700; margin: 4px 0 6px 0; opacity: 0.9; line-height: 1.4;">💡 <b>얼굴 사진 넣기:</b> 대기 중 구슬 클릭 후 복사한 사진 <code>Ctrl+V</code> (Delete 키로 삭제)</div>
+    <div class="avatar-hint" style="font-size: 11px; color: #ffd700; margin: 4px 0 6px 0; opacity: 0.9; line-height: 1.4;">💡 <b>얼굴 사진 넣기:</b> 대기 중 구슬 클릭 후 복사한 사진 <code>Ctrl+V</code> 또는 아래 <b>[📷 얼굴 사진 관리]</b> 버튼 클릭</div>
     <div class="actions">
       <button id="btnShuffle">
         <i class="icon shuffle"></i>
         <span data-trans>Shuffle</span>
+      </button>
+      <button type="button" id="btnOpenAvatarModal" class="btn" style="background: #f57f17; color: #fff; font-weight: bold; border: none; padding: 0 12px; cursor: pointer; border-radius: 4px; white-space: nowrap;" title="참가자 얼굴 사진 관리">
+        📷 얼굴 사진 관리
       </button>
       <button id="btnStart">
         <i class="icon play"></i>
@@ -678,6 +931,25 @@
 <div class="copyright">&copy; 2022-2026. 마블 룰렛™ by <a href="https://lazygyu.net" target="_blank">lazygyu</a> (modified by eljja)
 </div>
 <div id="mapEditorOverlay" class="map-editor-overlay hide"></div>
+<div id="avatarModal" class="result-modal hide">
+  <div class="result-modal-content" style="max-width: 540px; max-height: 85vh; display: flex; flex-direction: column;">
+    <div class="result-modal-header">
+      <h3>📷 마블 얼굴 사진(증명사진) 관리</h3>
+      <button type="button" id="btnCloseAvatarModal" class="btn-close" title="닫기">&times;</button>
+    </div>
+    <div style="padding: 10px 16px; font-size: 12px; color: #ccc; border-bottom: 1px solid rgba(255,255,255,0.1); line-height: 1.5; background: rgba(0,0,0,0.2);">
+      💡 <b>증명사진에 최적화:</b> 인물 얼굴 중심으로 자동 확대 크롭되어 구슬에 쏙 들어갑니다.<br>
+      • <b>[사진 선택]</b> 버튼으로 컴퓨터의 사진 파일을 바로 넣거나, 사진 복사 후 <b><code>Ctrl+V</code></b>로 붙여넣으세요.<br>
+      • 등록된 사진은 브라우저에 영구 저장되어 다음 접속 시에도 동일 이름에 자동 유지됩니다.
+    </div>
+    <div id="avatarList" class="result-modal-body" style="flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;">
+    </div>
+    <div class="result-modal-actions" style="padding: 10px 16px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between;">
+      <button type="button" id="btnClearAllAvatars" class="btn-exclude" style="background: #c62828;">🗑️ 모든 사진 초기화</button>
+      <button type="button" id="btnApplyAvatarModal" class="btn-restart" style="background: #2e7d32;">✅ 완료</button>
+    </div>
+  </div>
+</div>
 <div id="resultModal" class="result-modal hide">
   <div class="result-modal-content">
     <div class="result-modal-header">

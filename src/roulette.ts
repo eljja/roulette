@@ -480,7 +480,29 @@ export class Roulette extends EventTarget {
     });
 
     canvas.addEventListener('pointermove', (e) => {
-      canvas.style.cursor = this.resultCloseHitAt(e) ? 'pointer' : '';
+      if (this.resultCloseHitAt(e)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+      if (!this._isRunning) {
+        const sizeFactor = this._renderer.sizeFactor;
+        const sceneX = e.offsetX * sizeFactor;
+        const sceneY = e.offsetY * sizeFactor;
+        const totalZoom = initialZoom * this._camera.zoom;
+        const worldX = this._camera.x + (sceneX - this._renderer.width / 2) / totalZoom;
+        const worldY = this._camera.y + (sceneY - this._renderer.height / 2) / totalZoom;
+        const hoveredMarble = this._marbles.find((m) => {
+          const dist = Math.hypot(m.x - worldX, m.y - worldY);
+          return dist <= Math.max(m.size * 0.85, 0.5);
+        });
+        if (hoveredMarble) {
+          canvas.style.cursor = 'pointer';
+          canvas.title = `📷 [${hoveredMarble.name}] 클릭하여 선택 (Ctrl+V로 얼굴 사진 등록)`;
+          return;
+        }
+      }
+      canvas.style.cursor = '';
+      canvas.title = '';
     });
   }
 
@@ -513,7 +535,52 @@ export class Roulette extends EventTarget {
     }
   }
 
+  public getBgmManager(): BgmManager {
+    return this._bgmManager;
+  }
+
+  public getMarbles(): Marble[] {
+    return this._marbles;
+  }
+
+  public getSelectedMarble(): Marble | null {
+    return this._selectedMarble;
+  }
+
+  public async setMarbleAvatar(name: string, dataUrl: string): Promise<void> {
+    AvatarManager.setAvatar(name, dataUrl);
+    this.dispatchEvent(new CustomEvent('message', { detail: `📷 [${name}] 마블에 얼굴 사진이 등록되었습니다!` }));
+  }
+
+  public removeMarbleAvatar(name: string): void {
+    AvatarManager.removeAvatar(name);
+    this.dispatchEvent(new CustomEvent('message', { detail: `🗑️ [${name}] 마블의 얼굴 사진이 삭제되었습니다.` }));
+  }
+
+  public promptFileUpload(targetName?: string): void {
+    const name = targetName || this._selectedMarble?.name;
+    if (!name) return;
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (file) {
+        try {
+          const dataUrl = await AvatarManager.processImageBlob(file);
+          this.setMarbleAvatar(name, dataUrl);
+        } catch (e) {
+          console.error(e);
+          this.dispatchEvent(new CustomEvent('message', { detail: '⚠️ 이미지 처리 중 오류가 발생했습니다.' }));
+        }
+      }
+    };
+    input.click();
+  }
+
   private _handleMarbleClick(e: MouseEvent): void {
+    (document.activeElement as HTMLElement)?.blur();
     const sizeFactor = this._renderer.sizeFactor;
     const sceneX = e.offsetX * sizeFactor;
     const sceneY = e.offsetY * sizeFactor;
@@ -526,7 +593,7 @@ export class Roulette extends EventTarget {
 
     for (const m of this._marbles) {
       const dist = Math.hypot(m.x - worldX, m.y - worldY);
-      const hitRadius = Math.max(m.size * 0.75, 0.4);
+      const hitRadius = Math.max(m.size * 0.85, 0.5);
       if (dist <= hitRadius && dist < minDist) {
         minDist = dist;
         closestMarble = m;

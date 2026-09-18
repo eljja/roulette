@@ -7,19 +7,23 @@ export class BgmManager {
   private _videoId: string = 'ccEyoqLA1LU';
   private _isReady: boolean = false;
   private _isPlaying: boolean = false;
+  private _isMuted: boolean = false;
   private _volume: number = 50;
   private _container: HTMLElement | null = null;
+  private _shouldPlay: boolean = true; // 진입하자마자 자동 재생 시도
 
   constructor() {
+    this._isMuted = localStorage.getItem('mbr_bgm_muted') === 'true';
     this._initYouTubeAPI();
+    this._setupAutoplayUnlock();
   }
 
   private _initYouTubeAPI() {
-    // 숨겨진 플레이어 컨테이너 생성
+    // 뷰포트 내에 렌더링되게 하여 브라우저 백그라운드 스로틀링 방지 (투명도 0.001)
     this._container = document.createElement('div');
     this._container.id = 'bgm-player-container';
     this._container.style.cssText =
-      'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px;top:-9999px;';
+      'position:fixed;width:200px;height:200px;opacity:0.001;pointer-events:none;right:0;bottom:0;z-index:-9999;';
     document.body.appendChild(this._container);
 
     const playerDiv = document.createElement('div');
@@ -41,19 +45,19 @@ export class BgmManager {
     };
 
     // 이미 API가 로드된 경우
-    if ((window as any).YT && (window as any).YT.Player) {
+    if ((window as any).YT?.Player) {
       this._createPlayer();
     }
   }
 
   private _createPlayer() {
     const YT = (window as any).YT;
-    if (!YT || !YT.Player) return;
+    if (!YT?.Player) return;
 
     this._player = new YT.Player('bgm-youtube-player', {
       videoId: this._videoId,
       playerVars: {
-        autoplay: 0,
+        autoplay: 1, // 진입 즉시 자동 재생 요청
         loop: 1,
         playlist: this._videoId,
         controls: 0,
@@ -64,28 +68,75 @@ export class BgmManager {
         onReady: () => {
           this._isReady = true;
           this._player.setVolume(this._volume);
+          if (this._isMuted) {
+            this._player.mute();
+          } else if (this._shouldPlay) {
+            try {
+              this._player.playVideo();
+              this._isPlaying = true;
+            } catch (e) {
+              console.warn('Autoplay blocked by browser policy, will play on user interaction:', e);
+            }
+          }
         },
         onStateChange: (event: any) => {
-          const YTState = (window as any).YT.PlayerState;
-          if (event.data === YTState.ENDED) {
+          const YTState = (window as any).YT?.PlayerState;
+          if (YTState && event.data === YTState.ENDED) {
             // 루프 재생
             this._player.seekTo(0);
             this._player.playVideo();
+          }
+          if (YTState && event.data === YTState.PLAYING) {
+            this._isPlaying = true;
+          } else if (YTState && (event.data === YTState.PAUSED || event.data === YTState.ENDED)) {
+            this._isPlaying = false;
           }
         },
       },
     });
   }
 
+  /**
+   * 브라우저 자동 재생 정책 해제 핸들러: 사용자가 화면을 클릭/터치/입력하는 즉시 BGM 활성화
+   */
+  private _setupAutoplayUnlock() {
+    const unlockAndPlay = () => {
+      if (this._isMuted) return;
+      this._shouldPlay = true;
+      if (this._isReady && this._player) {
+        try {
+          this._player.unMute();
+          this._player.setVolume(this._volume);
+          this._player.playVideo();
+          this._isPlaying = true;
+        } catch (e) {
+          console.warn('Failed to unlock and play BGM:', e);
+        }
+      }
+    };
+
+    window.addEventListener('click', unlockAndPlay, { once: true });
+    window.addEventListener('pointerdown', unlockAndPlay, { once: true });
+    window.addEventListener('keydown', unlockAndPlay, { once: true });
+  }
+
   /** 재생 시작 */
   public play() {
+    if (this._isMuted) return;
+    this._shouldPlay = true;
     if (!this._isReady || !this._player) return;
-    this._player.playVideo();
-    this._isPlaying = true;
+    try {
+      this._player.unMute();
+      this._player.playVideo();
+      this._isPlaying = true;
+    } catch (e) {
+      console.warn('Failed to play BGM:', e);
+    }
   }
 
   /** 일시 정지 */
   public pause() {
+    this._shouldPlay = false;
     if (!this._isReady || !this._player) return;
     this._player.pauseVideo();
     this._isPlaying = false;
@@ -93,9 +144,33 @@ export class BgmManager {
 
   /** 정지 */
   public stop() {
+    this._shouldPlay = false;
     if (!this._isReady || !this._player) return;
     this._player.stopVideo();
     this._isPlaying = false;
+  }
+
+  /** 음소거 토글 */
+  public toggleMute(): boolean {
+    this._isMuted = !this._isMuted;
+    localStorage.setItem('mbr_bgm_muted', String(this._isMuted));
+    if (this._player && this._isReady) {
+      if (this._isMuted) {
+        this._player.mute();
+        this._player.pauseVideo();
+        this._isPlaying = false;
+      } else {
+        this._player.unMute();
+        this._player.setVolume(this._volume);
+        this._player.playVideo();
+        this._isPlaying = true;
+      }
+    }
+    return !this._isMuted;
+  }
+
+  public get isMuted(): boolean {
+    return this._isMuted;
   }
 
   /** 볼륨 설정 (0 ~ 100) */
