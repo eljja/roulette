@@ -98,6 +98,10 @@ div.copyright a {
   &.moon {
     mask-image: url('images/moon.svg');
   }
+
+  &.user {
+    mask-image: url('images/user.svg');
+  }
 }
 
 

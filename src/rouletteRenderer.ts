@@ -151,15 +151,15 @@ export class RouletteRenderer {
       const realSize = entries ? entries[0].contentRect : this._canvas.getBoundingClientRect();
       if (realSize.width <= 0 || realSize.height <= 0) return;
 
-      const width = Math.max(realSize.width / 2, 640);
-      const height = (width / realSize.width) * realSize.height;
-      this._sceneCanvas.width = width;
-      this._sceneCanvas.height = height;
-      this.sizeFactor = width / realSize.width;
-
       const displayWidth = Math.min(realSize.width, MAX_DISPLAY_WIDTH);
+      const displayHeight = (displayWidth / realSize.width) * realSize.height;
+
       this._canvas.width = displayWidth;
-      this._canvas.height = (displayWidth / realSize.width) * realSize.height;
+      this._canvas.height = displayHeight;
+
+      this._sceneCanvas.width = displayWidth;
+      this._sceneCanvas.height = displayHeight;
+      this.sizeFactor = displayWidth / realSize.width;
     };
 
     const resizeObserver = new ResizeObserver(resizing);
@@ -547,12 +547,19 @@ export class RouletteRenderer {
     );
 
     // Draw marble image or colored circle
-    const marbleSize = 100;
-    const marbleCenterX = this._sceneCanvas.width - marbleSize / 2 - 20;
+    const marbleSize = 130;
+    const marbleCenterX = this._sceneCanvas.width - marbleSize / 2 - 25;
     const marbleCenterY = this._sceneCanvas.height - winnerAreaHeight / 2;
     const marbleImage = this.getMarbleImage(winner.name);
 
     if (marbleImage) {
+      this.ctx.save();
+      this.ctx.imageSmoothingEnabled = true;
+      this.ctx.imageSmoothingQuality = 'high';
+      this.ctx.beginPath();
+      this.ctx.arc(marbleCenterX, marbleCenterY, marbleSize / 2, 0, Math.PI * 2);
+      this.ctx.closePath();
+      this.ctx.clip();
       this.ctx.drawImage(
         marbleImage,
         marbleCenterX - marbleSize / 2,
@@ -560,6 +567,12 @@ export class RouletteRenderer {
         marbleSize,
         marbleSize
       );
+      this.ctx.restore();
+      this.ctx.beginPath();
+      this.ctx.arc(marbleCenterX, marbleCenterY, marbleSize / 2, 0, Math.PI * 2);
+      this.ctx.strokeStyle = '#ffd700';
+      this.ctx.lineWidth = 3;
+      this.ctx.stroke();
     } else {
       this.ctx.beginPath();
       this.ctx.arc(marbleCenterX, marbleCenterY, marbleSize / 2, 0, Math.PI * 2);

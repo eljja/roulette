@@ -63,6 +63,8 @@ export class BgmManager {
         controls: 0,
         modestbranding: 1,
         rel: 0,
+        playsinline: 1,
+        origin: window.location.origin,
       },
       events: {
         onReady: () => {
@@ -72,10 +74,11 @@ export class BgmManager {
             this._player.mute();
           } else if (this._shouldPlay) {
             try {
+              this._player.unMute();
               this._player.playVideo();
               this._isPlaying = true;
             } catch (e) {
-              console.warn('Autoplay blocked by browser policy, will play on user interaction:', e);
+              console.warn('Autoplay blocked by browser policy, will play on first interaction:', e);
             }
           }
         },
@@ -97,7 +100,7 @@ export class BgmManager {
   }
 
   /**
-   * 브라우저 자동 재생 정책 해제 핸들러: 사용자가 화면을 클릭/터치/입력하는 즉시 BGM 활성화
+   * 브라우저 자동 재생 정책 해제 핸들러: 마우스 이동, 휠, 포커스 등 아주 미세한 동작만으로도 즉시 BGM 활성화
    */
   private _setupAutoplayUnlock() {
     const unlockAndPlay = () => {
@@ -115,9 +118,21 @@ export class BgmManager {
       }
     };
 
-    window.addEventListener('click', unlockAndPlay, { once: true });
-    window.addEventListener('pointerdown', unlockAndPlay, { once: true });
-    window.addEventListener('keydown', unlockAndPlay, { once: true });
+    const events = [
+      'mousemove',
+      'pointermove',
+      'mouseenter',
+      'scroll',
+      'wheel',
+      'focus',
+      'click',
+      'pointerdown',
+      'keydown',
+      'touchstart',
+    ];
+    events.forEach((evt) => {
+      window.addEventListener(evt, unlockAndPlay, { once: true, passive: true });
+    });
   }
 
   /** 재생 시작 */

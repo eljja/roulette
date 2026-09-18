@@ -635,8 +635,6 @@ export class Roulette extends EventTarget {
     this._result = null;
     this._winners = [];
     this._marbles = [];
-    // 리셋 시 BGM 정지
-    this._bgmManager.stop();
   }
 
   public async startRecording() {

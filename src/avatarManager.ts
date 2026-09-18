@@ -71,7 +71,7 @@ export class AvatarManager {
       img.onload = () => {
         URL.revokeObjectURL(url);
         const canvas = document.createElement('canvas');
-        const size = 160;
+        const size = 320;
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d');
