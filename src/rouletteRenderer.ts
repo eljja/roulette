@@ -151,15 +151,15 @@ export class RouletteRenderer {
       const realSize = entries ? entries[0].contentRect : this._canvas.getBoundingClientRect();
       if (realSize.width <= 0 || realSize.height <= 0) return;
 
+      const width = Math.max(realSize.width / 2, 640);
+      const height = (width / realSize.width) * realSize.height;
+      this._sceneCanvas.width = width;
+      this._sceneCanvas.height = height;
+      this.sizeFactor = width / realSize.width;
+
       const displayWidth = Math.min(realSize.width, MAX_DISPLAY_WIDTH);
-      const displayHeight = (displayWidth / realSize.width) * realSize.height;
-
       this._canvas.width = displayWidth;
-      this._canvas.height = displayHeight;
-
-      this._sceneCanvas.width = displayWidth;
-      this._sceneCanvas.height = displayHeight;
-      this.sizeFactor = displayWidth / realSize.width;
+      this._canvas.height = (displayWidth / realSize.width) * realSize.height;
     };
 
     const resizeObserver = new ResizeObserver(resizing);
