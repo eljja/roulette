@@ -484,6 +484,16 @@
     document.querySelector('#btnShuffle').click();
 
     const mapSelector = document.querySelector('#sltMap');
+    const btnDeleteMap = document.querySelector('#btnDeleteMap');
+
+    function updateMapDeleteButton() {
+      if (!btnDeleteMap) return;
+      const maps = window.roulette.getMaps();
+      const selectedIdx = parseInt(mapSelector.value, 10);
+      const selectedMap = maps.find((m) => m.index === selectedIdx);
+      const isCustom = selectedMap && selectedMap.title.startsWith('[커스텀]');
+      btnDeleteMap.style.display = isCustom ? 'inline-block' : 'none';
+    }
 
     function refreshMapSelector(selectedIdx) {
       mapSelector.innerHTML = '';
@@ -499,6 +509,7 @@
         if (window.translateElement) window.translateElement(option);
         mapSelector.append(option);
       });
+      updateMapDeleteButton();
     }
 
     refreshMapSelector();
@@ -506,6 +517,23 @@
     mapSelector.addEventListener('change', (e) => {
       window.roulette.setMap(parseInt(e.target.value, 10));
       getReady();
+      updateMapDeleteButton();
+    });
+
+    btnDeleteMap?.addEventListener('click', () => {
+      const selectedIdx = parseInt(mapSelector.value, 10);
+      const currentMap = window.roulette.getCurrentMap();
+      if (!currentMap) return;
+
+      if (confirm(`정말 '${currentMap.title}' 맵을 삭제하시겠습니까?`)) {
+        if (window.deleteCustomMapFromLocal) {
+          window.deleteCustomMapFromLocal(currentMap.title);
+        }
+        window.roulette.removeCustomMap(selectedIdx);
+        refreshMapSelector(0);
+        getReady();
+        simpleToast(`🗑️ '${currentMap.title}' 맵이 삭제되었습니다.`);
+      }
     });
 
     // 로컬 스토리지에 저장된 사용자 커스텀 맵 불러오기
@@ -854,6 +882,7 @@
         </label>
         <select id="sltMap"></select>
         <button type="button" id="btnOpenEditor" class="btn" style="margin-left: 6px; padding: 4px 8px; font-size: 11px; white-space: nowrap; background: #00838f;" title="맵 에디터 열기">🛠️ 에디터</button>
+        <button type="button" id="btnDeleteMap" class="btn btn-del" style="margin-left: 4px; padding: 4px 8px; font-size: 11px; white-space: nowrap; display: none; background: #c62828;" title="현재 커스텀 맵 삭제">🗑️ 맵 삭제</button>
       </div>
       <div class="row row-toggles">
         <div class='toggle-item'>

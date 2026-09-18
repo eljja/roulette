@@ -504,6 +504,21 @@ export class Roulette extends EventTarget {
       canvas.style.cursor = '';
       canvas.title = '';
     });
+
+    canvas.addEventListener(
+      'wheel',
+      (e: WheelEvent) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        // 우측 순위표 컬럼(160px) 밖에서 휠 스크롤 시 카메라 줌 인/아웃
+        if (x < rect.width - 160) {
+          e.preventDefault();
+          const factor = e.deltaY < 0 ? 1.12 : 0.89;
+          this._camera.zoomBy(factor);
+        }
+      },
+      { passive: false }
+    );
   }
 
   private _loadMap() {
@@ -860,6 +875,16 @@ export class Roulette extends EventTarget {
     }
     this.setMap(targetIdx);
     return targetIdx;
+  }
+
+  public removeCustomMap(index: number): boolean {
+    const customIdx = index - stages.length;
+    if (customIdx < 0 || customIdx >= this._customStages.length) {
+      return false;
+    }
+    this._customStages.splice(customIdx, 1);
+    this.setMap(0);
+    return true;
   }
 
   public getAllStages(): StageDef[] {

@@ -110,3 +110,20 @@ export function loadCustomMapsFromLocal(): StageDef[] {
   }
   return [];
 }
+
+/**
+ * 브라우저 로컬 저장소에서 커스텀 맵 삭제
+ */
+export function deleteCustomMapFromLocal(title: string): boolean {
+  try {
+    const existing = loadCustomMapsFromLocal();
+    const filtered = existing.filter((m) => m.title !== title);
+    if (filtered.length !== existing.length) {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filtered));
+      return true;
+    }
+  } catch (e) {
+    console.error('Failed to delete custom map from localStorage', e);
+  }
+  return false;
+}

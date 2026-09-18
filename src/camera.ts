@@ -101,6 +101,13 @@ export class Camera {
     this._filteredTarget.y = this._targetPosition.y;
   }
 
+  zoomBy(factor: number) {
+    this._isManual = true;
+    const newZoom = Math.max(0.2, Math.min(5.0, this._targetZoom * factor));
+    this._targetZoom = newZoom;
+    this._zoom = newZoom;
+  }
+
   resetManual() {
     this._isManual = false;
     this._locked = false;
