@@ -19,7 +19,7 @@ export class Minimap implements UIObject {
 
   private _onViewportChangeHandler: ((pos?: VectorLike) => void) | null = null;
   private boundingBox: Rect;
-  private mousePosition: { x: number; y: number } | null = null;
+  private isDragging = false;
 
   constructor() {
     this.boundingBox = {
@@ -43,8 +43,39 @@ export class Minimap implements UIObject {
   }
 
   @bound
+  onMouseDown(e?: { x: number; y: number; button?: number }) {
+    if (!e) return;
+    this.isDragging = true;
+    this.mousePosition = {
+      x: e.x,
+      y: e.y,
+    };
+    if (this._onViewportChangeHandler) {
+      this._onViewportChangeHandler({
+        x: this.mousePosition.x / MINIMAP_SCALE,
+        y: this.mousePosition.y / MINIMAP_SCALE,
+      });
+    }
+  }
+
+  @bound
+  onMouseUp(_e?: { x: number; y: number; button?: number }) {
+    if (this.isDragging) {
+      this.isDragging = false;
+      this.mousePosition = null;
+      if (this._onViewportChangeHandler) {
+        this._onViewportChangeHandler();
+      }
+    }
+  }
+
+  @bound
   onMouseMove(e?: { x: number; y: number }) {
+    if (!this.isDragging) {
+      return; // 마우스 클릭(드래그) 상태가 아닐 때는 뷰포트를 이동시키지 않음
+    }
     if (!e) {
+      this.isDragging = false;
       this.mousePosition = null;
       if (this._onViewportChangeHandler) {
         this._onViewportChangeHandler();
@@ -58,8 +89,8 @@ export class Minimap implements UIObject {
     };
     if (this._onViewportChangeHandler) {
       this._onViewportChangeHandler({
-        x: this.mousePosition.x / 4,
-        y: this.mousePosition.y / 4,
+        x: this.mousePosition.x / MINIMAP_SCALE,
+        y: this.mousePosition.y / MINIMAP_SCALE,
       });
     }
   }

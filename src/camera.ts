@@ -108,7 +108,6 @@ export class Camera {
   }
 
   zoomBy(factor: number) {
-    this._isManual = true;
     const newZoom = Math.max(0.2, Math.min(5.0, this._targetZoom * factor));
     this._targetZoom = newZoom;
     this._zoom = newZoom;
@@ -122,9 +121,7 @@ export class Camera {
 
   lock(v: boolean) {
     this._locked = v;
-    if (v) {
-      this._isManual = true;
-    }
+    this._isManual = v;
   }
 
   startFollowingMarbles() {

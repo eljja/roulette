@@ -55,6 +55,7 @@ export class Roulette extends EventTarget {
   private _keyHoldDuration: number = 0;
   private _isMiddleDragging: boolean = false;
   private _lastMiddlePos: { x: number; y: number } = { x: 0, y: 0 };
+  private _manualResumeTimeout: number | null = null;
   /** 진행 중에는 null, 당첨자가 모두 확정되면 당첨자 배열 */
   private _result: Marble[] | null = null;
 
@@ -400,6 +401,15 @@ export class Roulette extends EventTarget {
         if (!e || (e as MouseEvent).button === 1 || e.type === 'blur') {
           this._isMiddleDragging = false;
           canvas.style.cursor = '';
+          if (this._isRunning) {
+            if (this._manualResumeTimeout) clearTimeout(this._manualResumeTimeout);
+            this._manualResumeTimeout = window.setTimeout(() => {
+              if (this._isRunning && !this._isMiddleDragging && this._keysDown.size === 0) {
+                this._camera.resetManual();
+                this.dispatchEvent(new CustomEvent('message', { detail: '카메라: 선두 추적 복귀' }));
+              }
+            }, 2500);
+          }
         }
       }
     };
@@ -527,6 +537,15 @@ export class Roulette extends EventTarget {
         this._keysDown.delete(e.key);
         if (this._keysDown.size === 0) {
           this._keyHoldDuration = 0;
+          if (this._isRunning) {
+            if (this._manualResumeTimeout) clearTimeout(this._manualResumeTimeout);
+            this._manualResumeTimeout = window.setTimeout(() => {
+              if (this._isRunning && !this._isMiddleDragging && this._keysDown.size === 0) {
+                this._camera.resetManual();
+                this.dispatchEvent(new CustomEvent('message', { detail: '카메라: 선두 추적 복귀' }));
+              }
+            }, 2500);
+          }
         }
       }
     });
@@ -980,6 +999,5 @@ export class Roulette extends EventTarget {
     const names = this._marbles.map((marble) => marble.name);
     this._stage = all[index];
     this.setMarbles(names);
-    this._camera.initializePosition();
   }
 }
