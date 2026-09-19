@@ -12,6 +12,7 @@ import type { ColorTheme } from './types/ColorTheme';
 import type { MapEntityState } from './types/MapEntity.type';
 import type { VectorLike } from './types/VectorLike';
 import type { UIObject } from './UIObject';
+import { getRotationRad } from './utils/utils';
 
 export type RenderParameters = {
   camera: Camera;
@@ -307,7 +308,7 @@ export class RouletteRenderer {
         case 'box': {
           const w = shape.width * 2;
           const h = shape.height * 2;
-          this.ctx.rotate(shape.rotation);
+          this.ctx.rotate(getRotationRad(shape.rotation));
           this.ctx.fillRect(-w / 2, -h / 2, w, h);
           this.ctx.strokeRect(-w / 2, -h / 2, w, h);
           break;

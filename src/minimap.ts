@@ -6,6 +6,7 @@ import type { Rect } from './types/rect.type';
 import type { VectorLike } from './types/VectorLike';
 import type { UIObject } from './UIObject';
 import { bound } from './utils/bound.decorator';
+import { getRotationRad } from './utils/utils';
 
 const MINIMAP_SCALE = 4;
 const MINIMAP_UNITS = 26;
@@ -150,7 +151,7 @@ export class Minimap implements UIObject {
         case 'box': {
           const w = shape.width * 2;
           const h = shape.height * 2;
-          this.ctx.rotate(shape.rotation);
+          this.ctx.rotate(getRotationRad(shape.rotation));
           this.ctx.fillRect(-w / 2, -h / 2, w, h);
           break;
         }

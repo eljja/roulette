@@ -2,6 +2,13 @@ export function rad(degree: number) {
   return (Math.PI * degree) / 180;
 }
 
+export function getRotationRad(rotation?: number): number {
+  if (!rotation) return 0;
+  // If absolute value > 2*PI, it was specified in degrees (e.g. 45, -45, 90, -90). Convert to radians.
+  // Otherwise, it is already in radians (e.g. 0.785398... = PI/4).
+  return Math.abs(rotation) > Math.PI * 2 ? (rotation * Math.PI) / 180 : rotation;
+}
+
 function getRegexValue(regex: RegExp, str: string) {
   const result = regex.exec(str);
   return result ? result[1] : '';

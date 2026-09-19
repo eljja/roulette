@@ -2,6 +2,7 @@ import Box2DFactory from 'box2d-wasm';
 import type { StageDef } from './data/maps';
 import type { IPhysics } from './IPhysics';
 import type { MapEntity, MapEntityState } from './types/MapEntity.type';
+import { getRotationRad } from './utils/utils';
 
 let cachedBox2DModule: any = null;
 
@@ -56,7 +57,9 @@ export class Box2dPhysics implements IPhysics {
 
       const fixtureDef = new this.Box2D.b2FixtureDef();
       fixtureDef.set_density(entity.props.density);
-      fixtureDef.set_restitution(entity.props.restitution);
+      const restitution =
+        entity.props.restitution > 1 ? Math.max(entity.props.restitution, 2.2) : entity.props.restitution;
+      fixtureDef.set_restitution(restitution);
 
       let shape;
       switch (entity.shape.type) {
@@ -64,9 +67,8 @@ export class Box2dPhysics implements IPhysics {
           shape = new this.Box2D.b2PolygonShape();
           const w = Math.max(0.01, entity.shape.width);
           const h = Math.max(0.01, entity.shape.height);
-          const rotDeg = entity.shape.rotation || 0;
-          if (rotDeg !== 0) {
-            const rad = (rotDeg * Math.PI) / 180;
+          const rad = getRotationRad(entity.shape.rotation);
+          if (rad !== 0) {
             const center = new this.Box2D.b2Vec2(0, 0);
             shape.SetAsBox(w, h, center, rad);
           } else {

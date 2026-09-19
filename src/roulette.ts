@@ -753,7 +753,9 @@ export class Roulette extends EventTarget {
 
     // BGM 시작 및 효과음 활성화 (첫 사용자 상호작용)
     this._soundManager.unlock();
-    this._bgmManager.play();
+    if (!this._bgmManager.isMuted) {
+      this._bgmManager.play();
+    }
 
     if (this._autoRecording) {
       this._recorder.start().then(() => {

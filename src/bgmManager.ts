@@ -155,8 +155,8 @@ export class BgmManager {
   }
 
   public play() {
+    if (this._isMuted) return;
     this._shouldPlay = true;
-    this._isMuted = false;
     if (!this._isReady || !this._player) return;
     try {
       this._player.unMute();

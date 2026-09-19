@@ -8,6 +8,7 @@ import type {
   MapEntity,
 } from '../types/MapEntity.type';
 import type { VectorLike } from '../types/VectorLike';
+import { getRotationRad } from '../utils/utils';
 
 export interface DragTemplateData {
   shapeType: 'box' | 'circle' | 'polyline';
@@ -174,6 +175,14 @@ export class MapEditor {
   public setStage(newStage: StageDef) {
     this.saveHistory();
     this.stage = JSON.parse(JSON.stringify(newStage));
+    // 에디터 UI에서는 도(degree) 단위로 표시/편집하므로 라디안으로 저장된 공식 맵 불러올 시 도 단위로 변환
+    this.stage.entities?.forEach((entity) => {
+      if (entity.shape.type === 'box' && entity.shape.rotation) {
+        if (Math.abs(entity.shape.rotation) <= Math.PI * 2) {
+          entity.shape.rotation = Math.round((entity.shape.rotation * 180) / Math.PI);
+        }
+      }
+    });
     this.selectedIndex = null;
     this.activeHandle = null;
     this.hoveredHandle = null;
@@ -1902,7 +1911,7 @@ export class MapEditor {
         case 'box': {
           const w = entity.shape.width * 2;
           const h = entity.shape.height * 2;
-          let rad = ((entity.shape.rotation || 0) * Math.PI) / 180;
+          let rad = getRotationRad(entity.shape.rotation);
           if (this.isTesting && this.isPhysicsReady && this.testPhysics && entity.type === 'kinematic') {
             const physEntities = this.testPhysics.getEntities();
             if (physEntities[idx]) {
