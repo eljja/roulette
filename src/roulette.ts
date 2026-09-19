@@ -78,6 +78,7 @@ export class Roulette extends EventTarget {
   private _soundManager: SoundManager = new SoundManager();
   /** 구슬 골인 효과음 쿨다운 (너무 자주 재생 방지) ms */
   private _goalSoundLastTime: number = 0;
+  private _lastGoalTime: number = 0;
 
   get isReady() {
     return this._isReady;
@@ -206,6 +207,7 @@ export class Roulette extends EventTarget {
       }
       if (marble.y > this._stage.goalY) {
         this._winners.push(marble);
+        this._lastGoalTime = performance.now();
         if (this._isRunning && this._isWinningRank(this._winners.length - 1)) {
           this._particleManager.shot(this._renderer.width, this._renderer.height);
         }
@@ -246,17 +248,29 @@ export class Roulette extends EventTarget {
     if (!this._isRunning) return;
     const { start, end } = this._winnerRange;
 
-    // 남은 구슬이 1개면 그 등수는 골인하지 않아도 확정된다. 2개 이상 남았다면 그들 사이의
-    // 순위는 물리로만 정해지므로 예측하지 않는다 (당첨 범위 안에서도 순위는 의미를 가진다)
-    const early = this._winners.length > 0 && this._marbles.length === 1;
-    const ranked = early ? [...this._winners, this._marbles[0]] : this._winners;
-    if (ranked.length <= end) return;
-
-    if (early && this._isWinningRank(this._winners.length)) {
-      this._particleManager.shot(this._renderer.width, this._renderer.height);
+    // 마지막 구슬까지 모두 골인한 후에 결과 확정 및 결과창 팝업
+    // 아직 트랙을 주행 중인 구슬이 남아있다면 경기를 계속 진행
+    if (this._marbles.length > 0) {
+      // 안전 워치독: 당첨자가 이미 모두 결정되었고 남은 구슬이 15초 이상 멈춰서 정체된 경우에만 안전 종료
+      const allWinnersDecided = this._winners.length > end;
+      if (allWinnersDecided && this._lastGoalTime > 0) {
+        const now = performance.now();
+        if (now - this._lastGoalTime > 15000) {
+          // 정체된 남은 구슬들을 현재 Y 위치 순으로 우승자 목록에 추가하고 종료
+          const remaining = [...this._marbles].sort((a, b) => b.y - a.y);
+          this._winners.push(...remaining);
+          this._marbles = [];
+        } else {
+          return;
+        }
+      } else {
+        return;
+      }
     }
 
-    this._result = ranked.slice(start, end + 1);
+    if (this._winners.length <= end) return;
+
+    this._result = this._winners.slice(start, end + 1);
     this._isRunning = false;
     this._isPaused = false;
 
@@ -733,6 +747,7 @@ export class Roulette extends EventTarget {
   public start() {
     this._isRunning = true;
     this._isPaused = false;
+    this._lastGoalTime = performance.now();
     this._winnerRange = clipWinnerRange(options.winnerRange, this._marbles.length);
     this._camera.startFollowingMarbles();
 

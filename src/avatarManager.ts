@@ -97,9 +97,9 @@ export class AvatarManager {
         if (sx + cropSize > img.width) sx = Math.max(0, img.width - cropSize);
         if (sy + cropSize > img.height) sy = Math.max(0, img.height - cropSize);
 
-        // 원형 클리핑 영역
+        // 원형 클리핑 영역 (전체 캔버스에 꽉 차게 클리핑하여 축소 착시 제거)
         ctx.beginPath();
-        ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+        ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
         ctx.closePath();
         ctx.clip();
 
@@ -110,7 +110,7 @@ export class AvatarManager {
 
         // 부드러운 테두리
         ctx.beginPath();
-        ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+        ctx.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2);
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.lineWidth = 2;
         ctx.stroke();

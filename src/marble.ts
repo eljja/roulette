@@ -182,6 +182,9 @@ export class Marble {
 
     // ctx.shadowColor = this.color;
     // ctx.shadowBlur = zoom / 2;
+    // 단색 마블과 동일하게 몸통 배경을 먼저 꽉 채워 렌더링
+    this._drawMarbleBody(ctx, false);
+
     if (skin) {
       transformGuard(ctx, () => {
         ctx.imageSmoothingEnabled = true;
@@ -202,7 +205,6 @@ export class Marble {
         ctx.stroke();
       });
     } else {
-      this._drawMarbleBody(ctx, false);
       const emojiMatch = this.name.match(/^\p{Extended_Pictographic}/u);
       if (emojiMatch) {
         transformGuard(ctx, () => {
