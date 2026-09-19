@@ -134,34 +134,17 @@ export class Marble {
     outline: boolean,
     isMinimap: boolean = false,
     skin: CanvasImageSource | undefined,
-    viewPort: { x: number; y: number; w: number; h: number; zoom: number },
+    _viewPort: { x: number; y: number; w: number; h: number; zoom: number },
     theme: ColorTheme
   ) {
     this.theme = theme;
-    const viewPortHw = viewPort.w / viewPort.zoom / 2;
-    const viewPortHh = viewPort.h / viewPort.zoom / 2;
-    // 화면 가장자리나 확대/축소 시 구슬이 시야에서 깜빡이거나 사라지지 않도록 충분한 안전 여유 마진 적용
-    const cullMargin = Math.max(5.0, viewPortHw * 0.5);
-    const viewPortLeft = viewPort.x - viewPortHw - cullMargin;
-    const viewPortRight = viewPort.x + viewPortHw + cullMargin;
-    const viewPortTop = viewPort.y - viewPortHh - cullMargin;
-    const viewPortBottom = viewPort.y + viewPortHh + cullMargin;
-    const halfSize = this.size / 2;
-    const isOutsideView =
-      this.x + halfSize < viewPortLeft ||
-      this.x - halfSize > viewPortRight ||
-      this.y + halfSize < viewPortTop ||
-      this.y - halfSize > viewPortBottom;
-    if (!isMinimap && isOutsideView) {
-      return;
-    }
-    const transform = ctx.getTransform();
+    ctx.save();
     if (isMinimap) {
       this._renderMinimap(ctx);
     } else {
       this._renderNormal(ctx, zoom, outline, skin);
     }
-    ctx.setTransform(transform);
+    ctx.restore();
   }
 
   private _renderMinimap(ctx: CanvasRenderingContext2D) {
