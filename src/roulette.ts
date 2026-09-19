@@ -857,6 +857,15 @@ export class Roulette extends EventTarget {
       rows > 1 ? Math.max(0.52, (sp.height - marginY * 2) / (rows - 1)) : marbleSpacingY
     );
 
+    const totalGroupHeight = (rows - 1) * actualSpacingY;
+    // 출발 영역 안에 들어갈 수 있으면 상하 여백 균등 배치
+    // 출발 영역을 넘어서는 대규모 인원(수백~1000개)일 경우, 장애물이 있는 아래쪽(+Y)으로 침범하지 않고
+    // 통로 벽이 높게 뻗어 있는 위쪽(-Y 방향)으로 쌓아 올려 장애물 내부 스폰 방지
+    const bottomY =
+      totalGroupHeight <= sp.height - marginY * 2
+        ? sp.y + marginY + (sp.height - marginY * 2 - totalGroupHeight) / 2 + totalGroupHeight
+        : sp.y + sp.height - marginY;
+
     const marblePositions: { x: number; y: number }[] = [];
     for (let i = 0; i < totalCount; i++) {
       const row = Math.floor(i / cols);
@@ -865,7 +874,7 @@ export class Roulette extends EventTarget {
       const rowWidth = (countInThisRow - 1) * marbleSpacingX;
       const rowStartX = sp.x + (sp.width - rowWidth) / 2;
       const x = countInThisRow > 1 ? rowStartX + col * marbleSpacingX : sp.x + sp.width / 2;
-      const y = sp.y + marginY + row * actualSpacingY;
+      const y = bottomY - row * actualSpacingY;
       marblePositions.push({ x, y });
     }
 
@@ -887,8 +896,7 @@ export class Roulette extends EventTarget {
     // 카메라를 구슬 생성 위치(출발 영역 상단)로 이동 + 줌인
     if (totalCount > 0) {
       const centerX = sp.x + sp.width / 2;
-      const topY = sp.y + marginY;
-      const bottomY = sp.y + marginY + (rows - 1) * actualSpacingY;
+      const topY = bottomY - totalGroupHeight;
       const groupCenterY = (topY + bottomY) / 2;
       const groupHeight = Math.max(sp.height, bottomY - topY + 2);
 
@@ -896,11 +904,11 @@ export class Roulette extends EventTarget {
       const viewW = canvasWidth / initialZoom;
       const viewH = canvasHeight / initialZoom;
       const zoom = Math.max(
-        1.2,
+        0.5,
         Math.min(Math.min(viewW / (sp.width + margin * 2), viewH / (groupHeight + margin * 2)), 2.8)
       );
 
-      this._camera.initializePosition({ x: centerX, y: groupCenterY + 1.0 }, zoom);
+      this._camera.initializePosition({ x: centerX, y: groupCenterY }, zoom);
     }
   }
 
