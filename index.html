@@ -605,6 +605,7 @@
     const bgmIcon = document.querySelector('#bgmIcon');
     const bgmText = document.querySelector('#bgmText');
     if (btnToggleBgm) {
+      localStorage.removeItem('mbr_bgm_muted');
       const updateBgmBtn = () => {
         const bgm = window.roulette?.getBgmManager?.();
         if (!bgm) return;
@@ -617,9 +618,9 @@
         }
         btnToggleBgm.style.opacity = isMuted ? '0.6' : '1.0';
       };
-      setTimeout(updateBgmBtn, 200);
-      setTimeout(updateBgmBtn, 800);
-      btnToggleBgm.addEventListener('click', () => {
+      setInterval(updateBgmBtn, 500);
+      btnToggleBgm.addEventListener('click', (e) => {
+        e.stopPropagation();
         const bgm = window.roulette?.getBgmManager?.();
         if (bgm) {
           bgm.toggleMute();
@@ -1000,7 +1001,8 @@
       <button type="button" id="btnNextRoundExclude" class="btn-exclude">⏭️ 당첨자 제외하고 다음 판 (서바이벌)</button>
       <button type="button" id="btnRestartSame" class="btn-restart">🔄 같은 명단으로 다시 준비</button>
     </div>
-  </div>
+<div id="youtube-bgm-wrapper" style="position: fixed; right: 0; bottom: 0; width: 200px; height: 200px; opacity: 0.001; pointer-events: none; z-index: -9999;">
+  <div id="youtube-bgm-player"></div>
 </div>
 </body>
 </html>
