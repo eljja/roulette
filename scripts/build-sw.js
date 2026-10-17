@@ -15,7 +15,7 @@
 // 이 파일은 최소 1년(2027-08까지) 유지해야 한다. 404가 되면 회수 경로가 끊긴다.
 
 const assert = require('node:assert');
-const { readFileSync, writeFileSync } = require('node:fs');
+const { readFileSync, writeFileSync, copyFileSync, existsSync } = require('node:fs');
 
 // 캐시 이름을 필터링하는 이유: github.io는 origin을 다른 프로젝트 페이지와
 // 공유한다. caches.keys()를 전부 지우면 남의 프로젝트 캐시까지 지운다.
@@ -61,3 +61,60 @@ writeFileSync('dist/service-worker.js', killSwitch);
 const html = readFileSync('dist/index.html', 'utf-8');
 const bundleSrc = html.match(/<script type=module src=([^\s>]+)/)?.[1] ?? '';
 assert(/\.[0-9a-f]{6,}\.js/.test(bundleSrc), `버전 추출 실패: module script src가 "${bundleSrc}"`);
+
+// SEO 정적 파일 dist로 복사
+if (existsSync('robots.txt')) {
+  copyFileSync('robots.txt', 'dist/robots.txt');
+  console.log('[SEO] robots.txt -> dist/robots.txt 복사 완료');
+}
+if (existsSync('sitemap.xml')) {
+  copyFileSync('sitemap.xml', 'dist/sitemap.xml');
+  console.log('[SEO] sitemap.xml -> dist/sitemap.xml 복사 완료');
+}
+
+// Parcel이 canonical URL을 해시 토큰으로 치환하는 문제 보정 및 JSON-LD 주입
+let processedHtml = html;
+if (processedHtml.includes('rel=canonical') || processedHtml.includes('rel="canonical"')) {
+  processedHtml = processedHtml.replace(/<link rel=["']?canonical["']? href=[^\s>]+(\s*data-parcel-ignore)?>/i, '<link rel="canonical" href="https://eljja.github.io/roulette/">');
+  console.log('[SEO] dist/index.html canonical URL 보정 완료');
+}
+
+const jsonLdScript = `<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Marble Roulette",
+  "alternateName": ["마블 룰렛", "마블룰렛", "구슬 룰렛", "구슬룰렛", "Marble Race Picker"],
+  "url": "https://eljja.github.io/roulette/",
+  "description": "공정한 물리 엔진 기반의 무료 온라인 마블 룰렛 및 구슬 레이스 추첨기. Free online marble race simulator and random name picker.",
+  "applicationCategory": "GameApplication, UtilitiesApplication",
+  "operatingSystem": "All",
+  "inLanguage": ["ko", "en"],
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "eljja",
+    "url": "https://github.com/eljja"
+  }
+}
+</script>`;
+
+if (processedHtml.includes('<!-- JSON-LD-PLACEHOLDER -->')) {
+  processedHtml = processedHtml.replace('<!-- JSON-LD-PLACEHOLDER -->', jsonLdScript);
+  console.log('[SEO] dist/index.html JSON-LD 주입 완료');
+} else if (!processedHtml.includes('application/ld+json')) {
+  if (processedHtml.includes('<body')) {
+    processedHtml = processedHtml.replace('<body', `${jsonLdScript}\n<body`);
+  } else if (processedHtml.includes('</head>')) {
+    processedHtml = processedHtml.replace('</head>', `${jsonLdScript}\n</head>`);
+  }
+  console.log('[SEO] dist/index.html JSON-LD 주입 완료');
+}
+
+if (processedHtml !== html) {
+  writeFileSync('dist/index.html', processedHtml);
+}
