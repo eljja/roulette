@@ -71,14 +71,34 @@ if (existsSync('sitemap.xml')) {
   copyFileSync('sitemap.xml', 'dist/sitemap.xml');
   console.log('[SEO] sitemap.xml -> dist/sitemap.xml 복사 완료');
 }
+if (existsSync('googletQU4ms4HtuSSnlNO14YJO8OMyy59mqlFixqXl3Lhlbw.html')) {
+  copyFileSync('googletQU4ms4HtuSSnlNO14YJO8OMyy59mqlFixqXl3Lhlbw.html', 'dist/googletQU4ms4HtuSSnlNO14YJO8OMyy59mqlFixqXl3Lhlbw.html');
+  console.log('[SEO] googletQU4ms4HtuSSnlNO14YJO8OMyy59mqlFixqXl3Lhlbw.html -> dist 복사 완료');
+}
 
-// Parcel이 canonical URL을 해시 토큰으로 치환하는 문제 보정 및 JSON-LD 주입
+// Parcel이 canonical URL을 해시 토큰으로 치환하는 문제 보정
 let processedHtml = html;
 if (processedHtml.includes('rel=canonical') || processedHtml.includes('rel="canonical"')) {
   processedHtml = processedHtml.replace(/<link rel=["']?canonical["']? href=[^\s>]+(\s*data-parcel-ignore)?>/i, '<link rel="canonical" href="https://eljja.github.io/roulette/">');
   console.log('[SEO] dist/index.html canonical URL 보정 완료');
 }
 
+// Google Search Console 검증 태그 및 <head></head> 복원
+// Parcel minifier가 <head>와 </head>를 지우고 태그 속성의 따옴표를 날려 GSC 봇이 head로 인식하지 못하는 문제 해결
+const gscTag = '<meta name="google-site-verification" content="tQU4ms4HtuSSnlNO14YJO8OMyy59mqlFixqXl3Lhlbw" />';
+// 기존의 축약/따옴표 없는 meta 태그 제거
+processedHtml = processedHtml.replace(/<meta\s+name=["']?google-site-verification["']?\s+content=["']?[^"'>\s]+["']?(\s*\/)?>/i, '');
+
+// <head>가 없으면 <html...> 바로 다음에 명시적 <head>와 함께 GSC 인증 태그를 최상단에 삽입
+if (!processedHtml.includes('<head>') && !processedHtml.includes('<head ')) {
+  processedHtml = processedHtml.replace(/(<html[^>]*>)/i, `$1\n<head>\n  <meta charset="UTF-8">\n  ${gscTag}`);
+  console.log('[SEO] dist/index.html <head> 및 GSC 인증 태그 삽입 완료');
+} else {
+  processedHtml = processedHtml.replace(/(<head[^>]*>)/i, `$1\n  ${gscTag}`);
+  console.log('[SEO] dist/index.html <head> 내부에 GSC 인증 태그 삽입 완료');
+}
+
+// JSON-LD 구조화 데이터
 const jsonLdScript = `<script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -109,10 +129,14 @@ if (processedHtml.includes('<!-- JSON-LD-PLACEHOLDER -->')) {
 } else if (!processedHtml.includes('application/ld+json')) {
   if (processedHtml.includes('<body')) {
     processedHtml = processedHtml.replace('<body', `${jsonLdScript}\n<body`);
-  } else if (processedHtml.includes('</head>')) {
-    processedHtml = processedHtml.replace('</head>', `${jsonLdScript}\n</head>`);
   }
   console.log('[SEO] dist/index.html JSON-LD 주입 완료');
+}
+
+// </head> 태그가 없으면 <body> 직전에 명시적 </head> 삽입
+if (!processedHtml.includes('</head>')) {
+  processedHtml = processedHtml.replace(/(<body[^>]*>)/i, '</head>\n$1');
+  console.log('[SEO] dist/index.html </head> 닫는 태그 삽입 완료');
 }
 
 if (processedHtml !== html) {
