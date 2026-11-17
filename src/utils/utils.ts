@@ -11,7 +11,7 @@ export function getRotationRad(rotation?: number): number {
 
 function getRegexValue(regex: RegExp, str: string) {
   const result = regex.exec(str);
-  return result ? result[1] : '';
+  return result ? (result[1] ?? '') : '';
 }
 
 export function parseName(nameStr: string) {
@@ -19,7 +19,8 @@ export function parseName(nameStr: string) {
   const countRegex = /\*(\d+)/;
   const hasWeight = weightRegex.test(nameStr);
   const hasCount = countRegex.test(nameStr);
-  const name = getRegexValue(/^\s*([^/*]+)?/, nameStr);
+  const rawName = getRegexValue(/^\s*([^/*]+)?/, nameStr);
+  const name = rawName.trim();
   if (!name) return null;
   const weight = hasWeight ? parseInt(getRegexValue(weightRegex, nameStr), 10) : 1;
   const count = hasCount ? parseInt(getRegexValue(countRegex, nameStr), 10) : 1;

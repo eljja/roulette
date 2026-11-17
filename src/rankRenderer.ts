@@ -20,7 +20,7 @@ export class RankRenderer implements UIObject {
   @bound
   onWheel(e: WheelEvent) {
     const target = e.target as HTMLCanvasElement;
-    if (target && target.getBoundingClientRect) {
+    if (target?.getBoundingClientRect) {
       const rect = target.getBoundingClientRect();
       const x = e.clientX - rect.left;
       if (x < rect.width - 160) {

@@ -91,7 +91,9 @@ processedHtml = processedHtml.replace(/<meta\s+name=["']?google-site-verificatio
 
 // <head>가 없으면 <html...> 바로 다음에 명시적 <head>와 함께 GSC 인증 태그를 최상단에 삽입
 if (!processedHtml.includes('<head>') && !processedHtml.includes('<head ')) {
-  processedHtml = processedHtml.replace(/(<html[^>]*>)/i, `$1\n<head>\n  <meta charset="UTF-8">\n  ${gscTag}`);
+  const hasCharset = /<meta\s+charset=/i.test(processedHtml);
+  const charsetTag = hasCharset ? '' : '\n  <meta charset="UTF-8">';
+  processedHtml = processedHtml.replace(/(<html[^>]*>)/i, `$1\n<head>${charsetTag}\n  ${gscTag}`);
   console.log('[SEO] dist/index.html <head> 및 GSC 인증 태그 삽입 완료');
 } else {
   processedHtml = processedHtml.replace(/(<head[^>]*>)/i, `$1\n  ${gscTag}`);

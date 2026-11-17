@@ -120,6 +120,19 @@ export class Box2dPhysics implements IPhysics {
     this.entities = [];
   }
 
+  destroy(): void {
+    if (!this.world) return;
+    this.clearMarbles();
+    this.clearEntities();
+    try {
+      this.Box2D.destroy(this.world);
+      this.Box2D.destroy(this.gravity);
+    } catch {
+      // ignore cleanup errors if module already torn down
+    }
+    (this as any).world = null;
+  }
+
   createMarble(id: number, x: number, y: number): void {
     const circleShape = new this.Box2D.b2CircleShape();
     circleShape.set_m_radius(0.25);

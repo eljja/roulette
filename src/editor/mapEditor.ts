@@ -104,6 +104,7 @@ export class MapEditor {
   private lastKeyTime = 0;
 
   private isRunning = false;
+  private abortController = new AbortController();
 
   constructor(canvas: HTMLCanvasElement, initialStage?: StageDef) {
     this.canvas = canvas;
@@ -402,7 +403,8 @@ export class MapEditor {
   }
 
   private bindEvents() {
-    window.addEventListener('resize', () => this.resize());
+    const { signal } = this.abortController;
+    window.addEventListener('resize', () => this.resize(), { signal });
     setTimeout(() => this.resize(), 50);
 
     // 휠 스크롤 및 줌
@@ -439,364 +441,534 @@ export class MapEditor {
           }
         }
       },
-      { passive: false }
+      { passive: false, signal }
     );
 
     // 마우스 다운
-    this.canvas.addEventListener('mousedown', (e: MouseEvent) => {
-      const rect = this.canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const sx = (e.clientX - rect.left) * dpr;
-      const sy = (e.clientY - rect.top) * dpr;
-      const world = this.screenToWorld(sx, sy);
+    this.canvas.addEventListener(
+      'mousedown',
+      (e: MouseEvent) => {
+        const rect = this.canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const sx = (e.clientX - rect.left) * dpr;
+        const sy = (e.clientY - rect.top) * dpr;
+        const world = this.screenToWorld(sx, sy);
 
-      // 0. 미니맵 클릭 검사 (뷰포트 이동) - 테스트 플레이 중이든 편집 중이든 항상 최우선 처리!
-      const goalY = this.stage.goalY;
-      const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
-      const mmW = this.MINIMAP_UNITS * mmScale;
-      const mmH = Math.max(80, goalY * mmScale);
-      if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
-        this.isMinimapDragging = true;
-        this.viewX = Math.max(0, Math.min(26, (sx - this.MINIMAP_X) / mmScale));
-        this.viewY = Math.max(0, Math.min(goalY, (sy - this.MINIMAP_Y) / mmScale));
-        return;
-      }
-
-      // 테스트 플레이 중: 캔버스 어디를 클릭/드래그하든 화면 이동(Pan)으로 작동
-      if (this.isTesting) {
-        this.isPanning = true;
-        this.panStart = { x: sx, y: sy };
-        this.canvas.style.cursor = 'grab';
-        return;
-      }
-
-      // 편집 모드: 우클릭, 휠클릭, Space키, Shift/Alt 조합: 뷰 이동(Pan)
-      if (e.button === 1 || e.button === 2 || e.shiftKey || e.altKey) {
-        e.preventDefault();
-        this.isPanning = true;
-        this.panStart = { x: sx, y: sy };
-        this.canvas.style.cursor = 'grab';
-        return;
-      }
-
-      if (e.button === 0) {
-        // 0.5 탭하여 배치(Tap-to-Place) 모드 시 아이템 즉시 생성
-        if (this.pendingPlacementTemplate) {
-          this.saveHistory();
-          const template = this.pendingPlacementTemplate;
-          const snapX = Math.round(world.x * 2) / 2;
-          const snapY = Math.round(world.y * 2) / 2;
-          const newEntity: MapEntity = {
-            position: { x: snapX, y: snapY },
-            type: template.entityType,
-            shape: JSON.parse(JSON.stringify(template.defaultShape)),
-            props: JSON.parse(JSON.stringify(template.defaultProps)),
-          };
-          if (!this.stage.entities) this.stage.entities = [];
-          this.stage.entities.push(newEntity);
-          this.selectedIndex = this.stage.entities.length - 1;
-          this.activeHandle = null;
-          this.onSelectionChange?.(newEntity, this.selectedIndex);
-          this.onStageChange?.(this.stage);
-          this.onToast?.(`[${template.label}] 배치 완료!`);
-          this.pendingPlacementTemplate = null;
-          document.querySelectorAll('.palette-item').forEach((p) => p.classList.remove('active-placement'));
+        // 0. 미니맵 클릭 검사 (뷰포트 이동) - 테스트 플레이 중이든 편집 중이든 항상 최우선 처리!
+        const goalY = this.stage.goalY;
+        const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
+        const mmW = this.MINIMAP_UNITS * mmScale;
+        const mmH = Math.max(80, goalY * mmScale);
+        if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
+          this.isMinimapDragging = true;
+          this.viewX = Math.max(0, Math.min(26, (sx - this.MINIMAP_X) / mmScale));
+          this.viewY = Math.max(0, Math.min(goalY, (sy - this.MINIMAP_Y) / mmScale));
           return;
         }
 
-        // 1. 현재 선택된 엔티티의 기즈모 핸들 클릭 여부 최우선 검사
-        if (this.selectedIndex !== null && this.stage.entities?.[this.selectedIndex]) {
-          const selEntity = this.stage.entities[this.selectedIndex];
-          const handle = this.hitTestHandle(selEntity, world.x, world.y, sx, sy);
-
-          if (handle) {
-            this.saveHistory();
-            const bShape = selEntity.shape.type === 'box' ? (selEntity.shape as EntityBoxShape) : null;
-            const cShape = selEntity.shape.type === 'circle' ? (selEntity.shape as EntityCircleShape) : null;
-
-            this.activeHandle = {
-              type: handle.type,
-              vertexIndex: handle.vertexIndex,
-              startWorld: { x: world.x, y: world.y },
-              entityStartPos: { x: selEntity.position.x, y: selEntity.position.y },
-              boxStartW: bShape?.width ?? 0,
-              boxStartH: bShape?.height ?? 0,
-              boxStartRot: bShape?.rotation ?? 0,
-              circleStartR: cShape?.radius ?? 0,
-            };
-            return;
-          }
-        }
-
-        // 2. 골 라인 조작 체크
-        if (Math.abs(world.y - this.stage.goalY) < 1.0) {
-          this.saveHistory();
-          this.activeHandle = {
-            type: 'goal',
-            startWorld: { x: world.x, y: world.y },
-            entityStartPos: { x: 0, y: 0 },
-            boxStartW: 0,
-            boxStartH: 0,
-            boxStartRot: 0,
-            circleStartR: 0,
-          };
-          this.canvas.style.cursor = 'ns-resize';
-          return;
-        }
-
-        // 2.5 출발 영역(Spawn Zone) 히트테스트
-        {
-          const sp = this.getSpawnArea();
-          const tolW = 8 / this.zoom; // 8px 허용 오차를 월드 단위로 변환
-          const left = sp.x;
-          const right = sp.x + sp.width;
-          const top = sp.y;
-          const bottom = sp.y + sp.height;
-          const inX = world.x >= left - tolW && world.x <= right + tolW;
-          const inY = world.y >= top - tolW && world.y <= bottom + tolW;
-          const spawnHandleBase = {
-            startWorld: { x: world.x, y: world.y },
-            entityStartPos: { x: 0, y: 0 },
-            boxStartW: 0,
-            boxStartH: 0,
-            boxStartRot: 0,
-            circleStartR: 0,
-            spawnStart: { ...sp },
-          };
-
-          // 에지 핸들 검사
-          if (inY && Math.abs(world.x - left) <= tolW) {
-            this.saveHistory();
-            this.activeHandle = { ...spawnHandleBase, type: 'spawn-left' };
-            this.selectedIndex = null;
-            this.onSelectionChange?.(null, null);
-            this.canvas.style.cursor = 'ew-resize';
-            return;
-          }
-          if (inY && Math.abs(world.x - right) <= tolW) {
-            this.saveHistory();
-            this.activeHandle = { ...spawnHandleBase, type: 'spawn-right' };
-            this.selectedIndex = null;
-            this.onSelectionChange?.(null, null);
-            this.canvas.style.cursor = 'ew-resize';
-            return;
-          }
-          if (inX && Math.abs(world.y - top) <= tolW) {
-            this.saveHistory();
-            this.activeHandle = { ...spawnHandleBase, type: 'spawn-top' };
-            this.selectedIndex = null;
-            this.onSelectionChange?.(null, null);
-            this.canvas.style.cursor = 'ns-resize';
-            return;
-          }
-          if (inX && Math.abs(world.y - bottom) <= tolW) {
-            this.saveHistory();
-            this.activeHandle = { ...spawnHandleBase, type: 'spawn-bottom' };
-            this.selectedIndex = null;
-            this.onSelectionChange?.(null, null);
-            this.canvas.style.cursor = 'ns-resize';
-            return;
-          }
-
-          // 영역 내부 클릭: 전체 이동
-          if (world.x > left + tolW && world.x < right - tolW && world.y > top + tolW && world.y < bottom - tolW) {
-            this.saveHistory();
-            this.activeHandle = { ...spawnHandleBase, type: 'spawn-body' };
-            this.selectedIndex = null;
-            this.onSelectionChange?.(null, null);
-            this.canvas.style.cursor = 'move';
-            return;
-          }
-        }
-
-        // 3. 엔티티 클릭 선택 체크 (위에 그려진 것 먼저)
-        const entities = this.stage.entities || [];
-        let hitIndex: number | null = null;
-
-        for (let i = entities.length - 1; i >= 0; i--) {
-          if (this.hitTest(entities[i], world.x, world.y)) {
-            hitIndex = i;
-            break;
-          }
-        }
-
-        this.selectedIndex = hitIndex;
-        if (hitIndex !== null) {
-          let ent = entities[hitIndex];
-
-          // Ctrl + 클릭/드래그: 즉시 복제하여 복제본을 드래그 대상으로 설정
-          if (e.ctrlKey || e.metaKey) {
-            this.saveHistory();
-            const cloned: MapEntity = JSON.parse(JSON.stringify(ent));
-            entities.push(cloned);
-            hitIndex = entities.length - 1;
-            this.selectedIndex = hitIndex;
-            ent = cloned;
-          } else {
-            this.saveHistory();
-          }
-
-          const bShape = ent.shape.type === 'box' ? (ent.shape as EntityBoxShape) : null;
-          const cShape = ent.shape.type === 'circle' ? (ent.shape as EntityCircleShape) : null;
-
-          this.activeHandle = {
-            type: 'body',
-            startWorld: { x: world.x, y: world.y },
-            entityStartPos: { x: ent.position.x, y: ent.position.y },
-            boxStartW: bShape?.width ?? 0,
-            boxStartH: bShape?.height ?? 0,
-            boxStartRot: bShape?.rotation ?? 0,
-            circleStartR: cShape?.radius ?? 0,
-          };
-          this.onSelectionChange?.(ent, hitIndex);
-        } else {
-          this.activeHandle = null;
-          this.onSelectionChange?.(null, null);
-          // 빈 영역 좌클릭 드래그 시에도 화면 이동(Pan) 지원
+        // 테스트 플레이 중: 캔버스 어디를 클릭/드래그하든 화면 이동(Pan)으로 작동
+        if (this.isTesting) {
           this.isPanning = true;
           this.panStart = { x: sx, y: sy };
           this.canvas.style.cursor = 'grab';
+          return;
         }
-      }
-    });
 
-    // 마우스 이동
-    window.addEventListener('mousemove', (e: MouseEvent) => {
-      const rect = this.canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const sx = (e.clientX - rect.left) * dpr;
-      const sy = (e.clientY - rect.top) * dpr;
-      const world = this.screenToWorld(sx, sy);
-      this.lastMouseWorldPos = { x: world.x, y: world.y };
+        // 편집 모드: 우클릭, 휠클릭, Space키, Shift/Alt 조합: 뷰 이동(Pan)
+        if (e.button === 1 || e.button === 2 || e.shiftKey || e.altKey) {
+          e.preventDefault();
+          this.isPanning = true;
+          this.panStart = { x: sx, y: sy };
+          this.canvas.style.cursor = 'grab';
+          return;
+        }
 
-      // 뷰 이동(Pan) 중
-      if (this.isPanning) {
-        const dx = (sx - this.panStart.x) / this.zoom;
-        const dy = (sy - this.panStart.y) / this.zoom;
-        this.viewX -= dx;
-        this.viewY -= dy;
-        this.panStart = { x: sx, y: sy };
-        return;
-      }
+        if (e.button === 0) {
+          // 0.5 탭하여 배치(Tap-to-Place) 모드 시 아이템 즉시 생성
+          if (this.pendingPlacementTemplate) {
+            this.saveHistory();
+            const template = this.pendingPlacementTemplate;
+            const snapX = Math.round(world.x * 2) / 2;
+            const snapY = Math.round(world.y * 2) / 2;
+            const newEntity: MapEntity = {
+              position: { x: snapX, y: snapY },
+              type: template.entityType,
+              shape: JSON.parse(JSON.stringify(template.defaultShape)),
+              props: JSON.parse(JSON.stringify(template.defaultProps)),
+            };
+            if (!this.stage.entities) this.stage.entities = [];
+            this.stage.entities.push(newEntity);
+            this.selectedIndex = this.stage.entities.length - 1;
+            this.activeHandle = null;
+            this.onSelectionChange?.(newEntity, this.selectedIndex);
+            this.onStageChange?.(this.stage);
+            this.onToast?.(`[${template.label}] 배치 완료!`);
+            this.pendingPlacementTemplate = null;
+            document.querySelectorAll('.palette-item').forEach((p) => p.classList.remove('active-placement'));
+            return;
+          }
 
-      // 미니맵 드래그 중 (뷰포트 추적 이동)
-      if (this.isMinimapDragging) {
-        const goalY = this.stage.goalY;
-        const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
-        this.viewX = Math.max(0, Math.min(26, (sx - this.MINIMAP_X) / mmScale));
-        this.viewY = Math.max(0, Math.min(goalY, (sy - this.MINIMAP_Y) / mmScale));
-        return;
-      }
+          // 1. 현재 선택된 엔티티의 기즈모 핸들 클릭 여부 최우선 검사
+          if (this.selectedIndex !== null && this.stage.entities?.[this.selectedIndex]) {
+            const selEntity = this.stage.entities[this.selectedIndex];
+            const handle = this.hitTestHandle(selEntity, world.x, world.y, sx, sy);
 
-      // 미니맵 영역 마우스 호버 커서
-      const goalY = this.stage.goalY;
-      const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
-      const mmW = this.MINIMAP_UNITS * mmScale;
-      const mmH = Math.max(80, goalY * mmScale);
-      if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
-        this.canvas.style.cursor = 'pointer';
-        return;
-      }
+            if (handle) {
+              this.saveHistory();
+              const bShape = selEntity.shape.type === 'box' ? (selEntity.shape as EntityBoxShape) : null;
+              const cShape = selEntity.shape.type === 'circle' ? (selEntity.shape as EntityCircleShape) : null;
 
-      // 테스트 플레이 중 마우스 커서 피드백
-      if (this.isTesting) {
-        this.canvas.style.cursor = this.isPanning ? 'grabbing' : 'grab';
-        return;
-      }
-
-      // 아무것도 드래그하지 않을 때 커서 모양 피드백
-      if (!this.activeHandle) {
-        let newCursor = '';
-
-        if (this.selectedIndex !== null && this.stage.entities?.[this.selectedIndex]) {
-          const selEntity = this.stage.entities[this.selectedIndex];
-          const handle = this.hitTestHandle(selEntity, world.x, world.y, sx, sy);
-          this.hoveredHandle = handle;
-
-          if (handle) {
-            switch (handle.type) {
-              case 'vertex':
-                newCursor = 'crosshair';
-                break;
-              case 'circle-radius':
-                newCursor = 'nwse-resize';
-                break;
-              case 'box-rotate':
-                newCursor = 'grab';
-                break;
-              case 'box-left':
-              case 'box-right':
-              case 'box-top':
-              case 'box-bottom': {
-                const rot = (selEntity.shape as EntityBoxShape).rotation || 0;
-                const edge = handle.type.replace('box-', '') as 'left' | 'right' | 'top' | 'bottom';
-                newCursor = this.getBoxResizeCursor(rot, edge);
-                break;
-              }
+              this.activeHandle = {
+                type: handle.type,
+                vertexIndex: handle.vertexIndex,
+                startWorld: { x: world.x, y: world.y },
+                entityStartPos: { x: selEntity.position.x, y: selEntity.position.y },
+                boxStartW: bShape?.width ?? 0,
+                boxStartH: bShape?.height ?? 0,
+                boxStartRot: bShape?.rotation ?? 0,
+                circleStartR: cShape?.radius ?? 0,
+              };
+              return;
             }
           }
-        }
 
-        if (!newCursor) {
+          // 2. 골 라인 조작 체크
           if (Math.abs(world.y - this.stage.goalY) < 1.0) {
-            newCursor = 'ns-resize';
-          } else {
-            // 출발 영역 커서 피드백
+            this.saveHistory();
+            this.activeHandle = {
+              type: 'goal',
+              startWorld: { x: world.x, y: world.y },
+              entityStartPos: { x: 0, y: 0 },
+              boxStartW: 0,
+              boxStartH: 0,
+              boxStartRot: 0,
+              circleStartR: 0,
+            };
+            this.canvas.style.cursor = 'ns-resize';
+            return;
+          }
+
+          // 2.5 출발 영역(Spawn Zone) 히트테스트
+          {
             const sp = this.getSpawnArea();
-            const tolW = 8 / this.zoom;
+            const tolW = 8 / this.zoom; // 8px 허용 오차를 월드 단위로 변환
             const left = sp.x;
             const right = sp.x + sp.width;
             const top = sp.y;
             const bottom = sp.y + sp.height;
             const inX = world.x >= left - tolW && world.x <= right + tolW;
             const inY = world.y >= top - tolW && world.y <= bottom + tolW;
+            const spawnHandleBase = {
+              startWorld: { x: world.x, y: world.y },
+              entityStartPos: { x: 0, y: 0 },
+              boxStartW: 0,
+              boxStartH: 0,
+              boxStartRot: 0,
+              circleStartR: 0,
+              spawnStart: { ...sp },
+            };
 
-            if (inY && (Math.abs(world.x - left) <= tolW || Math.abs(world.x - right) <= tolW)) {
-              newCursor = 'ew-resize';
-            } else if (inX && (Math.abs(world.y - top) <= tolW || Math.abs(world.y - bottom) <= tolW)) {
-              newCursor = 'ns-resize';
-            } else if (
-              world.x > left + tolW &&
-              world.x < right - tolW &&
-              world.y > top + tolW &&
-              world.y < bottom - tolW
-            ) {
-              newCursor = 'move';
+            // 에지 핸들 검사
+            if (inY && Math.abs(world.x - left) <= tolW) {
+              this.saveHistory();
+              this.activeHandle = { ...spawnHandleBase, type: 'spawn-left' };
+              this.selectedIndex = null;
+              this.onSelectionChange?.(null, null);
+              this.canvas.style.cursor = 'ew-resize';
+              return;
+            }
+            if (inY && Math.abs(world.x - right) <= tolW) {
+              this.saveHistory();
+              this.activeHandle = { ...spawnHandleBase, type: 'spawn-right' };
+              this.selectedIndex = null;
+              this.onSelectionChange?.(null, null);
+              this.canvas.style.cursor = 'ew-resize';
+              return;
+            }
+            if (inX && Math.abs(world.y - top) <= tolW) {
+              this.saveHistory();
+              this.activeHandle = { ...spawnHandleBase, type: 'spawn-top' };
+              this.selectedIndex = null;
+              this.onSelectionChange?.(null, null);
+              this.canvas.style.cursor = 'ns-resize';
+              return;
+            }
+            if (inX && Math.abs(world.y - bottom) <= tolW) {
+              this.saveHistory();
+              this.activeHandle = { ...spawnHandleBase, type: 'spawn-bottom' };
+              this.selectedIndex = null;
+              this.onSelectionChange?.(null, null);
+              this.canvas.style.cursor = 'ns-resize';
+              return;
+            }
+
+            // 영역 내부 클릭: 전체 이동
+            if (world.x > left + tolW && world.x < right - tolW && world.y > top + tolW && world.y < bottom - tolW) {
+              this.saveHistory();
+              this.activeHandle = { ...spawnHandleBase, type: 'spawn-body' };
+              this.selectedIndex = null;
+              this.onSelectionChange?.(null, null);
+              this.canvas.style.cursor = 'move';
+              return;
+            }
+          }
+
+          // 3. 엔티티 클릭 선택 체크 (위에 그려진 것 먼저)
+          const entities = this.stage.entities || [];
+          let hitIndex: number | null = null;
+
+          for (let i = entities.length - 1; i >= 0; i--) {
+            if (this.hitTest(entities[i], world.x, world.y)) {
+              hitIndex = i;
+              break;
+            }
+          }
+
+          this.selectedIndex = hitIndex;
+          if (hitIndex !== null) {
+            let ent = entities[hitIndex];
+
+            // Ctrl + 클릭/드래그: 즉시 복제하여 복제본을 드래그 대상으로 설정
+            if (e.ctrlKey || e.metaKey) {
+              this.saveHistory();
+              const cloned: MapEntity = JSON.parse(JSON.stringify(ent));
+              entities.push(cloned);
+              hitIndex = entities.length - 1;
+              this.selectedIndex = hitIndex;
+              ent = cloned;
             } else {
-              const entities = this.stage.entities || [];
-              for (let i = entities.length - 1; i >= 0; i--) {
-                if (this.hitTest(entities[i], world.x, world.y)) {
-                  newCursor = 'move';
+              this.saveHistory();
+            }
+
+            const bShape = ent.shape.type === 'box' ? (ent.shape as EntityBoxShape) : null;
+            const cShape = ent.shape.type === 'circle' ? (ent.shape as EntityCircleShape) : null;
+
+            this.activeHandle = {
+              type: 'body',
+              startWorld: { x: world.x, y: world.y },
+              entityStartPos: { x: ent.position.x, y: ent.position.y },
+              boxStartW: bShape?.width ?? 0,
+              boxStartH: bShape?.height ?? 0,
+              boxStartRot: bShape?.rotation ?? 0,
+              circleStartR: cShape?.radius ?? 0,
+            };
+            this.onSelectionChange?.(ent, hitIndex);
+          } else {
+            this.activeHandle = null;
+            this.onSelectionChange?.(null, null);
+            // 빈 영역 좌클릭 드래그 시에도 화면 이동(Pan) 지원
+            this.isPanning = true;
+            this.panStart = { x: sx, y: sy };
+            this.canvas.style.cursor = 'grab';
+          }
+        }
+      },
+      { signal }
+    );
+
+    // 마우스 이동
+    window.addEventListener(
+      'mousemove',
+      (e: MouseEvent) => {
+        const rect = this.canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const sx = (e.clientX - rect.left) * dpr;
+        const sy = (e.clientY - rect.top) * dpr;
+        const world = this.screenToWorld(sx, sy);
+        this.lastMouseWorldPos = { x: world.x, y: world.y };
+
+        // 뷰 이동(Pan) 중
+        if (this.isPanning) {
+          const dx = (sx - this.panStart.x) / this.zoom;
+          const dy = (sy - this.panStart.y) / this.zoom;
+          this.viewX -= dx;
+          this.viewY -= dy;
+          this.panStart = { x: sx, y: sy };
+          return;
+        }
+
+        // 미니맵 드래그 중 (뷰포트 추적 이동)
+        if (this.isMinimapDragging) {
+          const goalY = this.stage.goalY;
+          const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
+          this.viewX = Math.max(0, Math.min(26, (sx - this.MINIMAP_X) / mmScale));
+          this.viewY = Math.max(0, Math.min(goalY, (sy - this.MINIMAP_Y) / mmScale));
+          return;
+        }
+
+        // 미니맵 영역 마우스 호버 커서
+        const goalY = this.stage.goalY;
+        const mmScale = Math.min(this.MINIMAP_SCALE, Math.max(2, (this.canvas.height - 40) / Math.max(goalY, 30)));
+        const mmW = this.MINIMAP_UNITS * mmScale;
+        const mmH = Math.max(80, goalY * mmScale);
+        if (sx >= this.MINIMAP_X && sx <= this.MINIMAP_X + mmW && sy >= this.MINIMAP_Y && sy <= this.MINIMAP_Y + mmH) {
+          this.canvas.style.cursor = 'pointer';
+          return;
+        }
+
+        // 테스트 플레이 중 마우스 커서 피드백
+        if (this.isTesting) {
+          this.canvas.style.cursor = this.isPanning ? 'grabbing' : 'grab';
+          return;
+        }
+
+        // 아무것도 드래그하지 않을 때 커서 모양 피드백
+        if (!this.activeHandle) {
+          let newCursor = '';
+
+          if (this.selectedIndex !== null && this.stage.entities?.[this.selectedIndex]) {
+            const selEntity = this.stage.entities[this.selectedIndex];
+            const handle = this.hitTestHandle(selEntity, world.x, world.y, sx, sy);
+            this.hoveredHandle = handle;
+
+            if (handle) {
+              switch (handle.type) {
+                case 'vertex':
+                  newCursor = 'crosshair';
+                  break;
+                case 'circle-radius':
+                  newCursor = 'nwse-resize';
+                  break;
+                case 'box-rotate':
+                  newCursor = 'grab';
+                  break;
+                case 'box-left':
+                case 'box-right':
+                case 'box-top':
+                case 'box-bottom': {
+                  const rot = (selEntity.shape as EntityBoxShape).rotation || 0;
+                  const edge = handle.type.replace('box-', '') as 'left' | 'right' | 'top' | 'bottom';
+                  newCursor = this.getBoxResizeCursor(rot, edge);
                   break;
                 }
               }
             }
           }
+
+          if (!newCursor) {
+            if (Math.abs(world.y - this.stage.goalY) < 1.0) {
+              newCursor = 'ns-resize';
+            } else {
+              // 출발 영역 커서 피드백
+              const sp = this.getSpawnArea();
+              const tolW = 8 / this.zoom;
+              const left = sp.x;
+              const right = sp.x + sp.width;
+              const top = sp.y;
+              const bottom = sp.y + sp.height;
+              const inX = world.x >= left - tolW && world.x <= right + tolW;
+              const inY = world.y >= top - tolW && world.y <= bottom + tolW;
+
+              if (inY && (Math.abs(world.x - left) <= tolW || Math.abs(world.x - right) <= tolW)) {
+                newCursor = 'ew-resize';
+              } else if (inX && (Math.abs(world.y - top) <= tolW || Math.abs(world.y - bottom) <= tolW)) {
+                newCursor = 'ns-resize';
+              } else if (
+                world.x > left + tolW &&
+                world.x < right - tolW &&
+                world.y > top + tolW &&
+                world.y < bottom - tolW
+              ) {
+                newCursor = 'move';
+              } else {
+                const entities = this.stage.entities || [];
+                for (let i = entities.length - 1; i >= 0; i--) {
+                  if (this.hitTest(entities[i], world.x, world.y)) {
+                    newCursor = 'move';
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          this.canvas.style.cursor = newCursor;
+          return;
         }
 
-        this.canvas.style.cursor = newCursor;
-        return;
-      }
+        // 기즈모 조작 처리
+        const handle = this.activeHandle;
 
-      // 기즈모 조작 처리
-      const handle = this.activeHandle;
+        if (handle.type === 'goal') {
+          const newGoalY = Math.max(20, Math.round(world.y * 2) / 2);
+          this.stage.goalY = newGoalY;
+          this.stage.zoomY = Math.max(15, newGoalY - 5);
+          this.onStageChange?.(this.stage);
+          return;
+        }
 
-      if (handle.type === 'goal') {
-        const newGoalY = Math.max(20, Math.round(world.y * 2) / 2);
-        this.stage.goalY = newGoalY;
-        this.stage.zoomY = Math.max(15, newGoalY - 5);
-        this.onStageChange?.(this.stage);
-        return;
-      }
+        // 출발 영역(Spawn Zone) 드래그 처리
+        if (handle.type.startsWith('spawn-') && handle.spawnStart) {
+          const sp = this.ensureSpawnArea();
+          const s = handle.spawnStart;
+          const dx = world.x - handle.startWorld.x;
+          const dy = world.y - handle.startWorld.y;
 
-      // 출발 영역(Spawn Zone) 드래그 처리
-      if (handle.type.startsWith('spawn-') && handle.spawnStart) {
-        const sp = this.ensureSpawnArea();
-        const s = handle.spawnStart;
-        const dx = world.x - handle.startWorld.x;
-        const dy = world.y - handle.startWorld.y;
+          if (handle.type === 'spawn-body') {
+            let dx = world.x - handle.startWorld.x;
+            let dy = world.y - handle.startWorld.y;
 
-        if (handle.type === 'spawn-body') {
+            // Shift 키: X축 또는 Y축 단일 방향으로만 이동 제한
+            if (e.shiftKey) {
+              if (Math.abs(dx) >= Math.abs(dy)) {
+                dy = 0;
+              } else {
+                dx = 0;
+              }
+            }
+
+            sp.x = Math.round((s.x + dx) * 4) / 4;
+            sp.y = Math.round((s.y + dy) * 4) / 4;
+          } else if (handle.type === 'spawn-left') {
+            const newLeft = Math.round((s.x + dx) * 4) / 4;
+            const maxLeft = s.x + s.width - 1;
+            sp.x = Math.min(newLeft, maxLeft);
+            sp.width = s.width - (sp.x - s.x);
+          } else if (handle.type === 'spawn-right') {
+            sp.width = Math.max(1, Math.round((s.width + dx) * 4) / 4);
+          } else if (handle.type === 'spawn-top') {
+            const newTop = Math.round((s.y + dy) * 4) / 4;
+            const maxTop = s.y + s.height - 1;
+            sp.y = Math.min(newTop, maxTop);
+            sp.height = s.height - (sp.y - s.y);
+          } else if (handle.type === 'spawn-bottom') {
+            sp.height = Math.max(1, Math.round((s.height + dy) * 4) / 4);
+          }
+          this.onStageChange?.(this.stage);
+          return;
+        }
+
+        if (this.selectedIndex === null || !this.stage.entities?.[this.selectedIndex]) return;
+        const entity = this.stage.entities[this.selectedIndex];
+        const shape = entity.shape;
+
+        // 1. Polyline 정점(Point) 드래그 위치 변경
+        if (handle.type === 'vertex' && handle.vertexIndex !== undefined && shape.type === 'polyline') {
+          const poly = shape as EntityPolylineShape;
+          if (poly.points[handle.vertexIndex]) {
+            let targetWx = world.x;
+            let targetWy = world.y;
+
+            // Shift 키: X축 또는 Y축 단일 방향으로만 정점 이동 제한
+            if (e.shiftKey) {
+              const dx = world.x - handle.startWorld.x;
+              const dy = world.y - handle.startWorld.y;
+              if (Math.abs(dx) >= Math.abs(dy)) {
+                targetWy = handle.startWorld.y;
+              } else {
+                targetWx = handle.startWorld.x;
+              }
+            }
+
+            // 0.25 단위 좌표 스냅
+            const snapWx = Math.round(targetWx * 4) / 4;
+            const snapWy = Math.round(targetWy * 4) / 4;
+            poly.points[handle.vertexIndex][0] = snapWx - entity.position.x;
+            poly.points[handle.vertexIndex][1] = snapWy - entity.position.y;
+            this.onSelectionChange?.(entity, this.selectedIndex);
+            this.onStageChange?.(this.stage);
+          }
+          return;
+        }
+
+        // 2. Circle 외곽선 드래그 (중심 고정 반지름 변경)
+        if (handle.type === 'circle-radius' && shape.type === 'circle') {
+          const circle = shape as EntityCircleShape;
+          const dist = Math.hypot(world.x - entity.position.x, world.y - entity.position.y);
+          // 0.05 단위 반지름 스냅 (최소 0.1m)
+          circle.radius = Math.max(0.1, Math.round(dist * 20) / 20);
+          this.onSelectionChange?.(entity, this.selectedIndex);
+          this.onStageChange?.(this.stage);
+          return;
+        }
+
+        // 3. Box 크기 조절 (회전 막대는 중심 고정 대칭 조절, 고정핀/안내벽은 4방향 조절)
+        if (
+          (handle.type === 'box-left' ||
+            handle.type === 'box-right' ||
+            handle.type === 'box-top' ||
+            handle.type === 'box-bottom') &&
+          shape.type === 'box'
+        ) {
+          const box = shape as EntityBoxShape;
+          const isKinematic = entity.type === 'kinematic'; // 회전 막대
+          const rad = (box.rotation * Math.PI) / 180;
+          const cos = Math.cos(rad);
+          const sin = Math.sin(rad);
+
+          // 마우스 월드 위치를 상자 시작 중심 기준 로컬 좌표로 변환
+          const dx = world.x - handle.entityStartPos.x;
+          const dy = world.y - handle.entityStartPos.y;
+          const lx = dx * cos + dy * sin;
+          const ly = -dx * sin + dy * cos;
+
+          if (isKinematic) {
+            // 회전 막대: 중심 엄격 고정, 좌우/상하 대칭 크기 조절
+            if (handle.type === 'box-left' || handle.type === 'box-right') {
+              box.width = Math.max(0.1, Math.round(Math.abs(lx) * 20) / 20);
+            } else {
+              box.height = Math.max(0.025, Math.round(Math.abs(ly) * 40) / 40);
+            }
+          } else {
+            // 고정 핀 / 안내 벽: 4방향 각각 조절 (반대쪽 에지는 고정 유지)
+            if (handle.type === 'box-right') {
+              const w0 = handle.boxStartW;
+              const newHalfW = Math.max(0.05, (lx - -w0) / 2);
+              const deltaCenter = (lx - w0) / 2;
+              entity.position.x = handle.entityStartPos.x + deltaCenter * cos;
+              entity.position.y = handle.entityStartPos.y + deltaCenter * sin;
+              box.width = Math.round(newHalfW * 20) / 20;
+            } else if (handle.type === 'box-left') {
+              const w0 = handle.boxStartW;
+              const newHalfW = Math.max(0.05, (w0 - lx) / 2);
+              const deltaCenter = (lx - -w0) / 2;
+              entity.position.x = handle.entityStartPos.x + deltaCenter * cos;
+              entity.position.y = handle.entityStartPos.y + deltaCenter * sin;
+              box.width = Math.round(newHalfW * 20) / 20;
+            } else if (handle.type === 'box-bottom') {
+              const h0 = handle.boxStartH;
+              const newHalfH = Math.max(0.025, (ly - -h0) / 2);
+              const deltaCenter = (ly - h0) / 2;
+              entity.position.x = handle.entityStartPos.x - deltaCenter * sin;
+              entity.position.y = handle.entityStartPos.y + deltaCenter * cos;
+              box.height = Math.round(newHalfH * 40) / 40;
+            } else if (handle.type === 'box-top') {
+              const h0 = handle.boxStartH;
+              const newHalfH = Math.max(0.025, (h0 - ly) / 2);
+              const deltaCenter = (ly - -h0) / 2;
+              entity.position.x = handle.entityStartPos.x - deltaCenter * sin;
+              entity.position.y = handle.entityStartPos.y + deltaCenter * cos;
+              box.height = Math.round(newHalfH * 40) / 40;
+            }
+          }
+
+          this.onSelectionChange?.(entity, this.selectedIndex);
+          this.onStageChange?.(this.stage);
+          return;
+        }
+
+        // 4. Box 회전 핸들 드래그
+        if (handle.type === 'box-rotate' && shape.type === 'box') {
+          const box = shape as EntityBoxShape;
+          const dx = world.x - entity.position.x;
+          const dy = world.y - entity.position.y;
+          const rotRad = Math.atan2(dy, dx) + Math.PI / 2;
+          let rotDeg = (rotRad * 180) / Math.PI;
+          rotDeg = ((rotDeg % 360) + 360) % 360;
+
+          // Shift 키가 안 눌려 있으면 5도 단위 스냅
+          if (!e.shiftKey) {
+            rotDeg = Math.round(rotDeg / 5) * 5;
+          }
+
+          box.rotation = rotDeg;
+          this.onSelectionChange?.(entity, this.selectedIndex);
+          this.onStageChange?.(this.stage);
+          return;
+        }
+
+        // 5. 전체 엔티티 이동 (Body Drag)
+        if (handle.type === 'body') {
           let dx = world.x - handle.startWorld.x;
           let dy = world.y - handle.startWorld.y;
 
@@ -809,189 +981,31 @@ export class MapEditor {
             }
           }
 
-          sp.x = Math.round((s.x + dx) * 4) / 4;
-          sp.y = Math.round((s.y + dy) * 4) / 4;
-        } else if (handle.type === 'spawn-left') {
-          const newLeft = Math.round((s.x + dx) * 4) / 4;
-          const maxLeft = s.x + s.width - 1;
-          sp.x = Math.min(newLeft, maxLeft);
-          sp.width = s.width - (sp.x - s.x);
-        } else if (handle.type === 'spawn-right') {
-          sp.width = Math.max(1, Math.round((s.width + dx) * 4) / 4);
-        } else if (handle.type === 'spawn-top') {
-          const newTop = Math.round((s.y + dy) * 4) / 4;
-          const maxTop = s.y + s.height - 1;
-          sp.y = Math.min(newTop, maxTop);
-          sp.height = s.height - (sp.y - s.y);
-        } else if (handle.type === 'spawn-bottom') {
-          sp.height = Math.max(1, Math.round((s.height + dy) * 4) / 4);
-        }
-        this.onStageChange?.(this.stage);
-        return;
-      }
+          let nx = handle.entityStartPos.x + dx;
+          let ny = handle.entityStartPos.y + dy;
+          nx = Math.round(nx * 4) / 4;
+          ny = Math.round(ny * 4) / 4;
 
-      if (this.selectedIndex === null || !this.stage.entities?.[this.selectedIndex]) return;
-      const entity = this.stage.entities[this.selectedIndex];
-      const shape = entity.shape;
-
-      // 1. Polyline 정점(Point) 드래그 위치 변경
-      if (handle.type === 'vertex' && handle.vertexIndex !== undefined && shape.type === 'polyline') {
-        const poly = shape as EntityPolylineShape;
-        if (poly.points[handle.vertexIndex]) {
-          let targetWx = world.x;
-          let targetWy = world.y;
-
-          // Shift 키: X축 또는 Y축 단일 방향으로만 정점 이동 제한
-          if (e.shiftKey) {
-            const dx = world.x - handle.startWorld.x;
-            const dy = world.y - handle.startWorld.y;
-            if (Math.abs(dx) >= Math.abs(dy)) {
-              targetWy = handle.startWorld.y;
-            } else {
-              targetWx = handle.startWorld.x;
-            }
-          }
-
-          // 0.25 단위 좌표 스냅
-          const snapWx = Math.round(targetWx * 4) / 4;
-          const snapWy = Math.round(targetWy * 4) / 4;
-          poly.points[handle.vertexIndex][0] = snapWx - entity.position.x;
-          poly.points[handle.vertexIndex][1] = snapWy - entity.position.y;
+          entity.position.x = nx;
+          entity.position.y = ny;
           this.onSelectionChange?.(entity, this.selectedIndex);
           this.onStageChange?.(this.stage);
         }
-        return;
-      }
-
-      // 2. Circle 외곽선 드래그 (중심 고정 반지름 변경)
-      if (handle.type === 'circle-radius' && shape.type === 'circle') {
-        const circle = shape as EntityCircleShape;
-        const dist = Math.hypot(world.x - entity.position.x, world.y - entity.position.y);
-        // 0.05 단위 반지름 스냅 (최소 0.1m)
-        circle.radius = Math.max(0.1, Math.round(dist * 20) / 20);
-        this.onSelectionChange?.(entity, this.selectedIndex);
-        this.onStageChange?.(this.stage);
-        return;
-      }
-
-      // 3. Box 크기 조절 (회전 막대는 중심 고정 대칭 조절, 고정핀/안내벽은 4방향 조절)
-      if (
-        (handle.type === 'box-left' ||
-          handle.type === 'box-right' ||
-          handle.type === 'box-top' ||
-          handle.type === 'box-bottom') &&
-        shape.type === 'box'
-      ) {
-        const box = shape as EntityBoxShape;
-        const isKinematic = entity.type === 'kinematic'; // 회전 막대
-        const rad = (box.rotation * Math.PI) / 180;
-        const cos = Math.cos(rad);
-        const sin = Math.sin(rad);
-
-        // 마우스 월드 위치를 상자 시작 중심 기준 로컬 좌표로 변환
-        const dx = world.x - handle.entityStartPos.x;
-        const dy = world.y - handle.entityStartPos.y;
-        const lx = dx * cos + dy * sin;
-        const ly = -dx * sin + dy * cos;
-
-        if (isKinematic) {
-          // 회전 막대: 중심 엄격 고정, 좌우/상하 대칭 크기 조절
-          if (handle.type === 'box-left' || handle.type === 'box-right') {
-            box.width = Math.max(0.1, Math.round(Math.abs(lx) * 20) / 20);
-          } else {
-            box.height = Math.max(0.025, Math.round(Math.abs(ly) * 40) / 40);
-          }
-        } else {
-          // 고정 핀 / 안내 벽: 4방향 각각 조절 (반대쪽 에지는 고정 유지)
-          if (handle.type === 'box-right') {
-            const w0 = handle.boxStartW;
-            const newHalfW = Math.max(0.05, (lx - -w0) / 2);
-            const deltaCenter = (lx - w0) / 2;
-            entity.position.x = handle.entityStartPos.x + deltaCenter * cos;
-            entity.position.y = handle.entityStartPos.y + deltaCenter * sin;
-            box.width = Math.round(newHalfW * 20) / 20;
-          } else if (handle.type === 'box-left') {
-            const w0 = handle.boxStartW;
-            const newHalfW = Math.max(0.05, (w0 - lx) / 2);
-            const deltaCenter = (lx - -w0) / 2;
-            entity.position.x = handle.entityStartPos.x + deltaCenter * cos;
-            entity.position.y = handle.entityStartPos.y + deltaCenter * sin;
-            box.width = Math.round(newHalfW * 20) / 20;
-          } else if (handle.type === 'box-bottom') {
-            const h0 = handle.boxStartH;
-            const newHalfH = Math.max(0.025, (ly - -h0) / 2);
-            const deltaCenter = (ly - h0) / 2;
-            entity.position.x = handle.entityStartPos.x - deltaCenter * sin;
-            entity.position.y = handle.entityStartPos.y + deltaCenter * cos;
-            box.height = Math.round(newHalfH * 40) / 40;
-          } else if (handle.type === 'box-top') {
-            const h0 = handle.boxStartH;
-            const newHalfH = Math.max(0.025, (h0 - ly) / 2);
-            const deltaCenter = (ly - -h0) / 2;
-            entity.position.x = handle.entityStartPos.x - deltaCenter * sin;
-            entity.position.y = handle.entityStartPos.y + deltaCenter * cos;
-            box.height = Math.round(newHalfH * 40) / 40;
-          }
-        }
-
-        this.onSelectionChange?.(entity, this.selectedIndex);
-        this.onStageChange?.(this.stage);
-        return;
-      }
-
-      // 4. Box 회전 핸들 드래그
-      if (handle.type === 'box-rotate' && shape.type === 'box') {
-        const box = shape as EntityBoxShape;
-        const dx = world.x - entity.position.x;
-        const dy = world.y - entity.position.y;
-        const rotRad = Math.atan2(dy, dx) + Math.PI / 2;
-        let rotDeg = (rotRad * 180) / Math.PI;
-        rotDeg = ((rotDeg % 360) + 360) % 360;
-
-        // Shift 키가 안 눌려 있으면 5도 단위 스냅
-        if (!e.shiftKey) {
-          rotDeg = Math.round(rotDeg / 5) * 5;
-        }
-
-        box.rotation = rotDeg;
-        this.onSelectionChange?.(entity, this.selectedIndex);
-        this.onStageChange?.(this.stage);
-        return;
-      }
-
-      // 5. 전체 엔티티 이동 (Body Drag)
-      if (handle.type === 'body') {
-        let dx = world.x - handle.startWorld.x;
-        let dy = world.y - handle.startWorld.y;
-
-        // Shift 키: X축 또는 Y축 단일 방향으로만 이동 제한
-        if (e.shiftKey) {
-          if (Math.abs(dx) >= Math.abs(dy)) {
-            dy = 0;
-          } else {
-            dx = 0;
-          }
-        }
-
-        let nx = handle.entityStartPos.x + dx;
-        let ny = handle.entityStartPos.y + dy;
-        nx = Math.round(nx * 4) / 4;
-        ny = Math.round(ny * 4) / 4;
-
-        entity.position.x = nx;
-        entity.position.y = ny;
-        this.onSelectionChange?.(entity, this.selectedIndex);
-        this.onStageChange?.(this.stage);
-      }
-    });
+      },
+      { signal }
+    );
 
     // 마우스 업
-    window.addEventListener('mouseup', () => {
-      this.isPanning = false;
-      this.isMinimapDragging = false;
-      this.activeHandle = null;
-      this.canvas.style.cursor = '';
-    });
+    window.addEventListener(
+      'mouseup',
+      () => {
+        this.isPanning = false;
+        this.isMinimapDragging = false;
+        this.activeHandle = null;
+        this.canvas.style.cursor = '';
+      },
+      { signal }
+    );
 
     // 모바일 / 태블릿 터치 이벤트 지원 (1점 터치: 조작/화면이동, 2점 터치: 핀치 줌)
     let initialPinchDist = 0;
@@ -1016,7 +1030,7 @@ export class MapEditor {
           initialPinchZoom = this.zoom;
         }
       },
-      { passive: false }
+      { passive: false, signal }
     );
 
     this.canvas.addEventListener(
@@ -1038,7 +1052,7 @@ export class MapEditor {
           this.zoom = Math.max(6, Math.min(80, initialPinchZoom * ratio));
         }
       },
-      { passive: false }
+      { passive: false, signal }
     );
 
     const onTouchEnd = (e: TouchEvent) => {
@@ -1048,202 +1062,226 @@ export class MapEditor {
         initialPinchDist = 0;
       }
     };
-    this.canvas.addEventListener('touchend', onTouchEnd);
-    this.canvas.addEventListener('touchcancel', onTouchEnd);
+    this.canvas.addEventListener('touchend', onTouchEnd, { signal });
+    this.canvas.addEventListener('touchcancel', onTouchEnd, { signal });
 
     // 더블 클릭: Polyline 정점 추가 및 삭제
-    this.canvas.addEventListener('dblclick', (e: MouseEvent) => {
-      if (this.selectedIndex === null || !this.stage.entities?.[this.selectedIndex]) return;
-      const entity = this.stage.entities[this.selectedIndex];
-      if (entity.shape.type !== 'polyline') return;
+    this.canvas.addEventListener(
+      'dblclick',
+      (e: MouseEvent) => {
+        if (this.selectedIndex === null || !this.stage.entities?.[this.selectedIndex]) return;
+        const entity = this.stage.entities[this.selectedIndex];
+        if (entity.shape.type !== 'polyline') return;
 
-      const rect = this.canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const sx = (e.clientX - rect.left) * dpr;
-      const sy = (e.clientY - rect.top) * dpr;
-      const world = this.screenToWorld(sx, sy);
-      const poly = entity.shape as EntityPolylineShape;
-
-      // 1. 기존 정점 위에서 더블클릭 시: 해당 정점 삭제 (최소 2개 유지)
-      for (let i = 0; i < poly.points.length; i++) {
-        const p = poly.points[i];
-        const ptS = this.worldToScreen(entity.position.x + p[0], entity.position.y + p[1]);
-        if (Math.hypot(sx - ptS.x, sy - ptS.y) <= 12) {
-          if (poly.points.length > 2) {
-            this.saveHistory();
-            poly.points.splice(i, 1);
-            this.onSelectionChange?.(entity, this.selectedIndex);
-            this.onStageChange?.(this.stage);
-          }
-          return;
-        }
-      }
-
-      // 2. 선분 위에서 더블클릭 시: 해당 위치에 새 정점 삽입
-      for (let i = 0; i < poly.points.length - 1; i++) {
-        const p1 = poly.points[i];
-        const p2 = poly.points[i + 1];
-        const w1 = { x: entity.position.x + p1[0], y: entity.position.y + p1[1] };
-        const w2 = { x: entity.position.x + p2[0], y: entity.position.y + p2[1] };
-
-        const distToSegment = this.distancePointToSegment(world, w1, w2);
-        if (distToSegment <= 0.8) {
-          this.saveHistory();
-          const snapWx = Math.round(world.x * 4) / 4;
-          const snapWy = Math.round(world.y * 4) / 4;
-          poly.points.splice(i + 1, 0, [snapWx - entity.position.x, snapWy - entity.position.y]);
-          this.onSelectionChange?.(entity, this.selectedIndex);
-          this.onStageChange?.(this.stage);
-          return;
-        }
-      }
-    });
-
-    // 컨텍스트 메뉴 방지
-    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-
-    // 드래그 앤 드롭 (팔레트에서 캔버스로)
-    this.canvas.addEventListener('dragover', (e: DragEvent) => {
-      e.preventDefault();
-      if (e.dataTransfer) {
-        e.dataTransfer.dropEffect = 'copy';
-      }
-    });
-
-    this.canvas.addEventListener('drop', (e: DragEvent) => {
-      e.preventDefault();
-      const rawData = e.dataTransfer?.getData('application/json');
-      if (!rawData) return;
-
-      try {
-        const template = JSON.parse(rawData) as DragTemplateData;
         const rect = this.canvas.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
         const sx = (e.clientX - rect.left) * dpr;
         const sy = (e.clientY - rect.top) * dpr;
         const world = this.screenToWorld(sx, sy);
+        const poly = entity.shape as EntityPolylineShape;
 
-        const snapX = Math.round(world.x * 2) / 2;
-        const snapY = Math.round(world.y * 2) / 2;
-
-        const newEntity: MapEntity = {
-          position: { x: snapX, y: snapY },
-          type: template.entityType,
-          shape: JSON.parse(JSON.stringify(template.defaultShape)),
-          props: JSON.parse(JSON.stringify(template.defaultProps)),
-        };
-
-        this.saveHistory();
-        if (!this.stage.entities) {
-          this.stage.entities = [];
+        // 1. 기존 정점 위에서 더블클릭 시: 해당 정점 삭제 (최소 2개 유지)
+        for (let i = 0; i < poly.points.length; i++) {
+          const p = poly.points[i];
+          const ptS = this.worldToScreen(entity.position.x + p[0], entity.position.y + p[1]);
+          if (Math.hypot(sx - ptS.x, sy - ptS.y) <= 12) {
+            if (poly.points.length > 2) {
+              this.saveHistory();
+              poly.points.splice(i, 1);
+              this.onSelectionChange?.(entity, this.selectedIndex);
+              this.onStageChange?.(this.stage);
+            }
+            return;
+          }
         }
 
-        this.stage.entities.push(newEntity);
-        this.selectedIndex = this.stage.entities.length - 1;
-        this.onSelectionChange?.(newEntity, this.selectedIndex);
-        this.onStageChange?.(this.stage);
-      } catch (err) {
-        console.error('Failed to drop entity:', err);
-      }
-    });
+        // 2. 선분 위에서 더블클릭 시: 해당 위치에 새 정점 삽입
+        for (let i = 0; i < poly.points.length - 1; i++) {
+          const p1 = poly.points[i];
+          const p2 = poly.points[i + 1];
+          const w1 = { x: entity.position.x + p1[0], y: entity.position.y + p1[1] };
+          const w2 = { x: entity.position.x + p2[0], y: entity.position.y + p2[1] };
+
+          const distToSegment = this.distancePointToSegment(world, w1, w2);
+          if (distToSegment <= 0.8) {
+            this.saveHistory();
+            const snapWx = Math.round(world.x * 4) / 4;
+            const snapWy = Math.round(world.y * 4) / 4;
+            poly.points.splice(i + 1, 0, [snapWx - entity.position.x, snapWy - entity.position.y]);
+            this.onSelectionChange?.(entity, this.selectedIndex);
+            this.onStageChange?.(this.stage);
+            return;
+          }
+        }
+      },
+      { signal }
+    );
+
+    // 컨텍스트 메뉴 방지
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault(), { signal });
+
+    // 드래그 앤 드롭 (팔레트에서 캔버스로)
+    this.canvas.addEventListener(
+      'dragover',
+      (e: DragEvent) => {
+        e.preventDefault();
+        if (e.dataTransfer) {
+          e.dataTransfer.dropEffect = 'copy';
+        }
+      },
+      { signal }
+    );
+
+    this.canvas.addEventListener(
+      'drop',
+      (e: DragEvent) => {
+        e.preventDefault();
+        const rawData = e.dataTransfer?.getData('application/json');
+        if (!rawData) return;
+
+        try {
+          const template = JSON.parse(rawData) as DragTemplateData;
+          const rect = this.canvas.getBoundingClientRect();
+          const dpr = window.devicePixelRatio || 1;
+          const sx = (e.clientX - rect.left) * dpr;
+          const sy = (e.clientY - rect.top) * dpr;
+          const world = this.screenToWorld(sx, sy);
+
+          const snapX = Math.round(world.x * 2) / 2;
+          const snapY = Math.round(world.y * 2) / 2;
+
+          const newEntity: MapEntity = {
+            position: { x: snapX, y: snapY },
+            type: template.entityType,
+            shape: JSON.parse(JSON.stringify(template.defaultShape)),
+            props: JSON.parse(JSON.stringify(template.defaultProps)),
+          };
+
+          this.saveHistory();
+          if (!this.stage.entities) {
+            this.stage.entities = [];
+          }
+
+          this.stage.entities.push(newEntity);
+          this.selectedIndex = this.stage.entities.length - 1;
+          this.onSelectionChange?.(newEntity, this.selectedIndex);
+          this.onStageChange?.(this.stage);
+        } catch (err) {
+          console.error('Failed to drop entity:', err);
+        }
+      },
+      { signal }
+    );
 
     // 키보드 이벤트 (화면 내비게이션 및 단축키)
-    window.addEventListener('keydown', (e: KeyboardEvent) => {
-      const tag = (document.activeElement as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    window.addEventListener(
+      'keydown',
+      (e: KeyboardEvent) => {
+        const tag = (document.activeElement as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-      // 1. 방향키 카메라 이동 (테스트 플레이 중이든 편집 중이든 항상 작동)
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        e.preventDefault();
-        this.keysDown.add(e.key);
-        return;
-      }
+        // 1. 방향키 카메라 이동 (테스트 플레이 중이든 편집 중이든 항상 작동)
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+          e.preventDefault();
+          this.keysDown.add(e.key);
+          return;
+        }
 
-      // 2. PageUp / PageDown / Home / End 빠른 화면 이동
-      if (e.key === 'PageDown') {
-        e.preventDefault();
-        const pageSize = (this.canvas.height / this.zoom) * 0.75;
-        this.viewY = Math.min(this.stage.goalY + 15, this.viewY + pageSize);
-        return;
-      }
-      if (e.key === 'PageUp') {
-        e.preventDefault();
-        const pageSize = (this.canvas.height / this.zoom) * 0.75;
-        this.viewY = Math.max(-10, this.viewY - pageSize);
-        return;
-      }
-      if (e.key === 'Home') {
-        e.preventDefault();
-        this.viewY = this.getSpawnArea().y + 5;
-        return;
-      }
-      if (e.key === 'End') {
-        e.preventDefault();
-        this.viewY = this.stage.goalY;
-        return;
-      }
+        // 2. PageUp / PageDown / Home / End 빠른 화면 이동
+        if (e.key === 'PageDown') {
+          e.preventDefault();
+          const pageSize = (this.canvas.height / this.zoom) * 0.75;
+          this.viewY = Math.min(this.stage.goalY + 15, this.viewY + pageSize);
+          return;
+        }
+        if (e.key === 'PageUp') {
+          e.preventDefault();
+          const pageSize = (this.canvas.height / this.zoom) * 0.75;
+          this.viewY = Math.max(-10, this.viewY - pageSize);
+          return;
+        }
+        if (e.key === 'Home') {
+          e.preventDefault();
+          this.viewY = this.getSpawnArea().y + 5;
+          return;
+        }
+        if (e.key === 'End') {
+          e.preventDefault();
+          this.viewY = this.stage.goalY;
+          return;
+        }
 
-      // 테스트 플레이 중에는 편집 단축키 비활성화
-      if (this.isTesting) return;
+        // 테스트 플레이 중에는 편집 단축키 비활성화
+        if (this.isTesting) return;
 
-      const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+        const isCtrlOrMeta = e.ctrlKey || e.metaKey;
 
-      // Ctrl + Z: 실행 취소 (Undo)
-      if (isCtrlOrMeta && !e.shiftKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        this.undo();
-        return;
-      }
+        // Ctrl + Z: 실행 취소 (Undo)
+        if (isCtrlOrMeta && !e.shiftKey && e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          this.undo();
+          return;
+        }
 
-      // Ctrl + Y 또는 Ctrl + Shift + Z: 다시 실행 (Redo)
-      if (
-        (isCtrlOrMeta && e.key.toLowerCase() === 'y') ||
-        (isCtrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'z')
-      ) {
-        e.preventDefault();
-        this.redo();
-        return;
-      }
+        // Ctrl + Y 또는 Ctrl + Shift + Z: 다시 실행 (Redo)
+        if (
+          (isCtrlOrMeta && e.key.toLowerCase() === 'y') ||
+          (isCtrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'z')
+        ) {
+          e.preventDefault();
+          this.redo();
+          return;
+        }
 
-      // Ctrl + C: 선택 아이템 복사
-      if (isCtrlOrMeta && e.key.toLowerCase() === 'c' && this.selectedIndex !== null) {
-        e.preventDefault();
-        this.copySelectedEntity();
-        return;
-      }
+        // Ctrl + C: 선택 아이템 복사
+        if (isCtrlOrMeta && e.key.toLowerCase() === 'c' && this.selectedIndex !== null) {
+          e.preventDefault();
+          this.copySelectedEntity();
+          return;
+        }
 
-      // Ctrl + V: 아이템 붙여넣기
-      if (isCtrlOrMeta && e.key.toLowerCase() === 'v') {
-        e.preventDefault();
-        this.pasteEntity();
-        return;
-      }
+        // Ctrl + V: 아이템 붙여넣기
+        if (isCtrlOrMeta && e.key.toLowerCase() === 'v') {
+          e.preventDefault();
+          this.pasteEntity();
+          return;
+        }
 
-      // Delete / Backspace: 아이템 삭제
-      if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedIndex !== null) {
-        e.preventDefault();
-        this.deleteSelectedEntity();
-        return;
-      }
+        // Delete / Backspace: 아이템 삭제
+        if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedIndex !== null) {
+          e.preventDefault();
+          this.deleteSelectedEntity();
+          return;
+        }
 
-      // Ctrl + D: 아이템 복제
-      if (isCtrlOrMeta && e.key.toLowerCase() === 'd' && this.selectedIndex !== null) {
-        e.preventDefault();
-        this.duplicateSelectedEntity();
-        return;
-      }
-    });
+        // Ctrl + D: 아이템 복제
+        if (isCtrlOrMeta && e.key.toLowerCase() === 'd' && this.selectedIndex !== null) {
+          e.preventDefault();
+          this.duplicateSelectedEntity();
+          return;
+        }
+      },
+      { signal }
+    );
 
-    window.addEventListener('keyup', (e: KeyboardEvent) => {
-      if (this.keysDown.has(e.key)) {
-        this.keysDown.delete(e.key);
-      }
-    });
+    window.addEventListener(
+      'keyup',
+      (e: KeyboardEvent) => {
+        if (this.keysDown.has(e.key)) {
+          this.keysDown.delete(e.key);
+        }
+      },
+      { signal }
+    );
 
-    window.addEventListener('blur', () => {
-      this.keysDown.clear();
-      this.keyHoldDuration = 0;
-    });
+    window.addEventListener(
+      'blur',
+      () => {
+        this.keysDown.clear();
+        this.keyHoldDuration = 0;
+      },
+      { signal }
+    );
   }
 
   private distancePointToSegment(p: VectorLike, a: VectorLike, b: VectorLike): number {
@@ -1376,8 +1414,7 @@ export class MapEditor {
     this.isMinimapDragging = false;
     this.canvas.style.cursor = '';
     if (this.testPhysics) {
-      this.testPhysics.clearMarbles();
-      this.testPhysics.clear();
+      this.testPhysics.destroy();
       this.testPhysics = null;
     }
     this.testMarbles = [];
@@ -1431,6 +1468,7 @@ export class MapEditor {
   public destroy() {
     this.isRunning = false;
     cancelAnimationFrame(this.testAnimFrame);
+    this.abortController.abort();
     this.keysDown.clear();
     this.stopTestPlay();
   }

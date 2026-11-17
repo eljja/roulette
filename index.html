@@ -73,13 +73,15 @@
   }
 
   function parseName(nameStr) {
-    const weightRegex = /(\/\d+)/;
-    const countRegex = /(\*\d+)/;
+    const weightRegex = /\/(\d+)/;
+    const countRegex = /\*(\d+)/;
     const hasWeight = weightRegex.test(nameStr);
     const hasCount = countRegex.test(nameStr);
-    const name = /^\s*([^\/*]+)?/.exec(nameStr)[1];
-    const weight = hasWeight ? parseInt(weightRegex.exec(nameStr)[1].replace('/', '')) : 1;
-    const count = hasCount ? parseInt(countRegex.exec(nameStr)[1].replace('*', '')) : 1;
+    const rawMatch = /^\s*([^/*]+)?/.exec(nameStr);
+    const name = rawMatch && rawMatch[1] ? rawMatch[1].trim() : '';
+    if (!name) return null;
+    const weight = hasWeight ? parseInt(weightRegex.exec(nameStr)[1], 10) : 1;
+    const count = hasCount ? parseInt(countRegex.exec(nameStr)[1], 10) : 1;
     return {
       name,
       weight,
@@ -186,6 +188,7 @@
       const nameCounts = {};
       nameSource.forEach(nameSrc => {
         const name = parseName(nameSrc);
+        if (!name) return;
         const key = name.weight > 1 ? `${name.name}/${name.weight}` : name.name;
         if (!nameSet.has(key)) {
           nameSet.add(key);
@@ -457,11 +460,12 @@
       }
 
       // 각 항목 파싱
-      const parsedList = rawItems.map(itemStr => parseName(itemStr));
+      const parsedList = rawItems.map(itemStr => parseName(itemStr)).filter(Boolean);
       const winnersToExclude = [...currentWinners];
 
       for (const winnerName of winnersToExclude) {
-        const target = parsedList.find(p => p.name === winnerName && p.count > 0);
+        const cleanWinner = String(winnerName).trim();
+        const target = parsedList.find(p => p.name === cleanWinner && p.count > 0);
         if (target) {
           target.count -= 1;
         }
@@ -671,7 +675,7 @@
       if (!avatarListContainer) return;
       avatarListContainer.innerHTML = '';
       const rawNames = getNames();
-      const uniqueNames = [...new Set(rawNames.map((s) => parseName(s).name).filter(Boolean))];
+      const uniqueNames = [...new Set(rawNames.map((s) => parseName(s)?.name).filter(Boolean))];
 
       if (uniqueNames.length === 0) {
         avatarListContainer.innerHTML = '<div style="text-align:center; padding: 20px; color:#aaa;">참가자 명단을 먼저 입력해주세요.</div>';
@@ -863,7 +867,7 @@
           const blob = items[i].getAsFile();
           if (blob && window.AvatarManager) {
             e.preventDefault();
-            const targetName = selectedAvatarTarget || getNames().map((s) => parseName(s).name)[0];
+            const targetName = selectedAvatarTarget || getNames().map((s) => parseName(s)?.name).find(Boolean);
             if (targetName) {
               try {
                 const dataUrl = await window.AvatarManager.processImageBlob(blob);
@@ -898,7 +902,6 @@
     }
   }
 </script>
-<h1 class="sr-only">Marble Roulette™ 마블 룰렛™ - 랜덤 추첨기</h1>
 <div id="settings" class="settings">
   <div class="right">
     <button id="btnToggleSettings" class="btn-toggle-settings">

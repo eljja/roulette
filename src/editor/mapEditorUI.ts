@@ -1,5 +1,5 @@
 import { type StageDef, stages } from '../data/maps';
-import type { EntityBoxShape, EntityCircleShape, MapEntity } from '../types/MapEntity.type';
+import type { EntityBoxShape, EntityCircleShape, EntityPolylineShape, MapEntity } from '../types/MapEntity.type';
 import { type DragTemplateData, MapEditor } from './mapEditor';
 import { exportMapToJsonFile, exportMapToUrl, importMapFromJsonFile, saveCustomMapToLocal } from './mapSerializer';
 
@@ -520,38 +520,53 @@ export class MapEditorUI {
 
     // 인스펙터 입력 바인딩
     this.inspectorPanel.querySelector('#inPosX')?.addEventListener('change', (e: any) => {
+      this.editor.saveHistory();
       entity.position.x = parseFloat(e.target.value) || 0;
+      this.editor.onStageChange?.(this.editor.stage);
     });
     this.inspectorPanel.querySelector('#inPosY')?.addEventListener('change', (e: any) => {
+      this.editor.saveHistory();
       entity.position.y = parseFloat(e.target.value) || 0;
+      this.editor.onStageChange?.(this.editor.stage);
     });
 
     if (isBox) {
       const box = shape as EntityBoxShape;
       this.inspectorPanel.querySelector('#inBoxW')?.addEventListener('change', (e: any) => {
+        this.editor.saveHistory();
         box.width = Math.max(0.05, (parseFloat(e.target.value) || 1) / 2);
+        this.editor.onStageChange?.(this.editor.stage);
       });
       this.inspectorPanel.querySelector('#inBoxH')?.addEventListener('change', (e: any) => {
+        this.editor.saveHistory();
         box.height = Math.max(0.025, (parseFloat(e.target.value) || 0.2) / 2);
+        this.editor.onStageChange?.(this.editor.stage);
       });
       this.inspectorPanel.querySelector('#inRotation')?.addEventListener('change', (e: any) => {
+        this.editor.saveHistory();
         box.rotation = parseFloat(e.target.value) || 0;
+        this.editor.onStageChange?.(this.editor.stage);
       });
       this.inspectorPanel.querySelector('#sltBodyType')?.addEventListener('change', (e: any) => {
+        this.editor.saveHistory();
         entity.type = e.target.value;
         if (entity.type === 'kinematic' && !entity.props.angularVelocity) {
           entity.props.angularVelocity = 3.5;
         }
         this.updateInspector(entity, index);
+        this.editor.onStageChange?.(this.editor.stage);
       });
     } else if (isCircle) {
       const circle = shape as EntityCircleShape;
       this.inspectorPanel.querySelector('#inRadius')?.addEventListener('change', (e: any) => {
+        this.editor.saveHistory();
         circle.radius = Math.max(0.05, parseFloat(e.target.value) || 0.25);
+        this.editor.onStageChange?.(this.editor.stage);
       });
     } else if (shape.type === 'polyline') {
       const poly = shape as EntityPolylineShape;
       this.inspectorPanel.querySelector('#btnAddPolyPoint')?.addEventListener('click', () => {
+        this.editor.saveHistory();
         const len = poly.points.length;
         if (len >= 2) {
           const pPrev = poly.points[len - 2];
@@ -567,6 +582,7 @@ export class MapEditorUI {
       });
       this.inspectorPanel.querySelector('#btnRemovePolyPoint')?.addEventListener('click', () => {
         if (poly.points.length > 2) {
+          this.editor.saveHistory();
           poly.points.pop();
           this.updateInspector(entity, index);
           this.editor.onStageChange?.(this.editor.stage);
@@ -575,13 +591,19 @@ export class MapEditorUI {
     }
 
     this.inspectorPanel.querySelector('#inAngVel')?.addEventListener('change', (e: any) => {
+      this.editor.saveHistory();
       entity.props.angularVelocity = parseFloat(e.target.value) || 0;
+      this.editor.onStageChange?.(this.editor.stage);
     });
     this.inspectorPanel.querySelector('#inRestitution')?.addEventListener('change', (e: any) => {
+      this.editor.saveHistory();
       entity.props.restitution = Math.max(0, parseFloat(e.target.value) || 0);
+      this.editor.onStageChange?.(this.editor.stage);
     });
     this.inspectorPanel.querySelector('#inLife')?.addEventListener('change', (e: any) => {
+      this.editor.saveHistory();
       entity.props.life = parseInt(e.target.value, 10);
+      this.editor.onStageChange?.(this.editor.stage);
     });
 
     this.inspectorPanel.querySelector('#btnDuplicateItem')?.addEventListener('click', () => {

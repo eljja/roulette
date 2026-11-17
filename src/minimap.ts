@@ -21,6 +21,7 @@ export class Minimap implements UIObject {
   private _onViewportChangeHandler: ((pos?: VectorLike) => void) | null = null;
   private boundingBox: Rect;
   private isDragging = false;
+  private mousePosition: VectorLike | null = null;
 
   constructor() {
     this.boundingBox = {

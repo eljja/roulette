@@ -4,7 +4,7 @@ class Options {
   useSkills: boolean = true;
   /** 0-based, 양끝 포함. 1명 추첨은 start === end */
   winnerRange: WinnerRange = { start: 0, end: 0 };
-  autoRecording: boolean = true;
+  autoRecording: boolean = false;
 }
 
 const options = new Options();

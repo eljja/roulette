@@ -29,12 +29,17 @@ function seedRandom(seed: number) {
   };
 }
 
+let cachedNodeBox2D: any = null;
+
 // Node 의 emscripten 로더가 fetch 로 wasm 경로를 열려다 실패하므로 바이너리를 직접 넘긴다
 class NodePhysics extends Box2dPhysics {
   async init(): Promise<void> {
-    const wasmBinary = fs.readFileSync(new URL('../node_modules/box2d-wasm/dist/umd/Box2D.simd.wasm', import.meta.url));
+    if (!cachedNodeBox2D) {
+      const wasmBinary = fs.readFileSync(new URL('../node_modules/box2d-wasm/dist/umd/Box2D.simd.wasm', import.meta.url));
+      cachedNodeBox2D = await Box2DFactory({ wasmBinary } as any);
+    }
     const self = this as any;
-    self.Box2D = await Box2DFactory({ wasmBinary } as any);
+    self.Box2D = cachedNodeBox2D;
     self.gravity = new self.Box2D.b2Vec2(0, 10);
     self.world = new self.Box2D.b2World(self.gravity);
   }

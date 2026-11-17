@@ -17,6 +17,7 @@ export class BgmManager {
   private _isMuted: boolean = false; // 기본값: BGM ON
   private _volume: number = 50; // 기본 볼륨 50%
   private _shouldPlay: boolean = true; // 진입하자마자 자동 재생 시도
+  private _unlockAbortController: AbortController | null = null;
 
   constructor() {
     this._isMuted = false;
@@ -43,7 +44,7 @@ export class BgmManager {
       const tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
       const firstScript = document.getElementsByTagName('script')[0];
-      if (firstScript && firstScript.parentNode) {
+      if (firstScript?.parentNode) {
         firstScript.parentNode.insertBefore(tag, firstScript);
       } else {
         document.head.appendChild(tag);
@@ -102,12 +103,16 @@ export class BgmManager {
             if (YTState) {
               if (event.data === YTState.PLAYING) {
                 this._isPlaying = true;
+                this._unlockAbortController?.abort();
+                this._unlockAbortController = null;
               } else if (event.data === YTState.PAUSED) {
                 this._isPlaying = false;
               } else if (event.data === YTState.ENDED) {
                 this._isPlaying = false;
-                this._player?.seekTo(0);
-                this._player?.playVideo();
+                if (this._shouldPlay && !this._isMuted) {
+                  this._player?.seekTo(0);
+                  this._player?.playVideo();
+                }
               }
             }
           },
@@ -125,32 +130,25 @@ export class BgmManager {
    * 브라우저 자동 재생 정책 해제: 페이지 진입 후 화면 어느 곳이든 마우스 이동, 휠, 클릭 등 감지 즉시 BGM 활성화
    */
   private _setupAutoplayUnlock() {
+    this._unlockAbortController = new AbortController();
+    const { signal } = this._unlockAbortController;
+
     const unlockAndPlay = () => {
-      if (this._isMuted) return;
-      this._shouldPlay = true;
+      if (this._isMuted || !this._shouldPlay) return;
       if (this._isReady && this._player && !this._isPlaying) {
         try {
           this._player.unMute();
           this._player.setVolume(this._volume);
           this._player.playVideo();
-        } catch (e) {
+        } catch (_e) {
           // 아직 브라우저 정책상 차단된 경우 계속 대기
         }
       }
     };
 
-    const events = [
-      'pointerdown',
-      'mousedown',
-      'click',
-      'keydown',
-      'touchstart',
-      'wheel',
-      'mousemove',
-      'scroll',
-    ];
+    const events = ['pointerdown', 'mousedown', 'click', 'keydown', 'touchstart', 'wheel', 'mousemove', 'scroll'];
     events.forEach((evt) => {
-      window.addEventListener(evt, unlockAndPlay, { passive: true });
+      window.addEventListener(evt, unlockAndPlay, { passive: true, signal });
     });
   }
 

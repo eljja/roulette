@@ -78,7 +78,7 @@ export class Roulette extends EventTarget {
   private _soundManager: SoundManager = new SoundManager();
   /** 구슬 골인 효과음 쿨다운 (너무 자주 재생 방지) ms */
   private _goalSoundLastTime: number = 0;
-  private _lastGoalTime: number = 0;
+  private _postWinStallMs: number = 0;
 
   get isReady() {
     return this._isReady;
@@ -207,7 +207,7 @@ export class Roulette extends EventTarget {
       }
       if (marble.y > this._stage.goalY) {
         this._winners.push(marble);
-        this._lastGoalTime = performance.now();
+        this._postWinStallMs = 0;
         if (this._isRunning && this._isWinningRank(this._winners.length - 1)) {
           this._particleManager.shot(this._renderer.width, this._renderer.height);
         }
@@ -225,14 +225,15 @@ export class Roulette extends EventTarget {
       }
     }
 
+    const goalY = this._stage.goalY;
     const targetIndex = this._targetIndex;
     const topY = this._marbles[targetIndex] ? this._marbles[targetIndex].y : 0;
     this._goalDist = Math.abs(this._stage.zoomY - topY);
     this._timeScale = this._calcTimeScale();
 
-    this._marbles = this._marbles.filter((marble) => marble.y <= this._stage?.goalY);
+    this._marbles = this._marbles.filter((marble) => marble.y <= goalY);
 
-    this._checkFinish();
+    this._checkFinish(deltaTime);
   }
 
   /** 카메라와 슬로우모션이 주목할 구슬 = 당첨 커트라인에 걸쳐있는 구슬 */
@@ -244,20 +245,23 @@ export class Roulette extends EventTarget {
     return rank >= this._winnerRange.start && rank <= this._winnerRange.end;
   }
 
-  private _checkFinish() {
+  private _checkFinish(deltaTime: number = 0) {
     if (!this._isRunning) return;
     const { start, end } = this._winnerRange;
 
     // 마지막 구슬까지 모두 골인한 후에 결과 확정 및 결과창 팝업
     // 아직 트랙을 주행 중인 구슬이 남아있다면 경기를 계속 진행
     if (this._marbles.length > 0) {
-      // 안전 워치독: 당첨자가 이미 모두 결정되었고 남은 구슬이 15초 이상 멈춰서 정체된 경우에만 안전 종료
+      // 안전 워치독: 당첨자가 이미 모두 결정되었고 남은 구슬이 (일시정지 제외) 15초 이상 골인하지 못한 경우에만 안전 종료
       const allWinnersDecided = this._winners.length > end;
-      if (allWinnersDecided && this._lastGoalTime > 0) {
-        const now = performance.now();
-        if (now - this._lastGoalTime > 15000) {
-          // 정체된 남은 구슬들을 현재 Y 위치 순으로 우승자 목록에 추가하고 종료
+      if (allWinnersDecided) {
+        this._postWinStallMs += deltaTime;
+        if (this._postWinStallMs > 15000) {
+          // 정체된 남은 구슬들을 물리 월드에서 정리하고 현재 Y 위치 순으로 목록에 추가해 종료
           const remaining = [...this._marbles].sort((a, b) => b.y - a.y);
+          for (const m of remaining) {
+            this.physics.removeMarble(m.id);
+          }
           this._winners.push(...remaining);
           this._marbles = [];
         } else {
@@ -294,8 +298,10 @@ export class Roulette extends EventTarget {
     if (!this._stage) return 1;
     const targetIndex = this._targetIndex;
     if (this._winners.length < this._winnerRange.end + 1 && this._goalDist < zoomThreshold) {
+      const targetMarble = this._marbles[targetIndex];
       if (
-        this._marbles[targetIndex].y > this._stage.zoomY - zoomThreshold * 1.2 &&
+        targetMarble &&
+        targetMarble.y > this._stage.zoomY - zoomThreshold * 1.2 &&
         (this._marbles[targetIndex - 1] || this._marbles[targetIndex + 1])
       ) {
         return Math.max(0.2, this._goalDist / zoomThreshold);
@@ -747,7 +753,7 @@ export class Roulette extends EventTarget {
   public start() {
     this._isRunning = true;
     this._isPaused = false;
-    this._lastGoalTime = performance.now();
+    this._postWinStallMs = 0;
     this._winnerRange = clipWinnerRange(options.winnerRange, this._marbles.length);
     this._camera.startFollowingMarbles();
 
@@ -757,14 +763,18 @@ export class Roulette extends EventTarget {
       this._bgmManager.play();
     }
 
-    if (this._autoRecording) {
-      this._recorder.start().then(() => {
-        this.physics.start();
-        this._marbles.forEach((marble) => (marble.isActive = true));
-      });
-    } else {
+    const startPhysics = () => {
       this.physics.start();
       this._marbles.forEach((marble) => (marble.isActive = true));
+    };
+
+    if (this._autoRecording) {
+      this._recorder
+        .start()
+        .catch((e) => console.warn('Auto recording failed to start:', e))
+        .then(startPhysics);
+    } else {
+      startPhysics();
     }
   }
 
@@ -952,6 +962,7 @@ export class Roulette extends EventTarget {
 
   public reset() {
     this._isPaused = false;
+    this._postWinStallMs = 0;
     this._keysDown.clear();
     this._keyHoldDuration = 0;
     this.clearMarbles();
